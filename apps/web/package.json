@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@monaco-editor/react": "^4.7.0",
     "@nexora/shared": "workspace:*",
     "@nexora/ui": "workspace:*",
     "clsx": "^2.1.1",

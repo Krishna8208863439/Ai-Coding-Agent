@@ -9,6 +9,7 @@ import { AIChat } from './pages/AIChat';
 import { NewProject } from './pages/NewProject';
 import { ProjectExplorer } from './pages/ProjectExplorer';
 import { AIAgents } from './pages/AIAgents';
+import { AIWorkspace } from './pages/AIWorkspace';
 
 export default function App() {
   return (
@@ -16,22 +17,7 @@ export default function App() {
       <Route element={<AppShell />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/new-project" element={<NewProject />} />
-        <Route
-          path="/workspace"
-          element={
-            <ComingSoon
-              title="Advanced AI IDE Workspace"
-              phase={7}
-              description="Monaco editor integration, multi-tab editing, syntax highlighting, diff viewer, and file tree."
-              plannedFeatures={[
-                'Monaco code editor with tabs',
-                'Inline code suggestions & diffs',
-                'Project file tree explorer',
-                'Diagnostics & problems panel',
-              ]}
-            />
-          }
-        />
+        <Route path="/workspace" element={<AIWorkspace />} />
         <Route path="/agents" element={<AIAgents />} />
         <Route path="/api-manager" element={<ApiManager />} />
         <Route path="/models" element={<ModelLibrary />} />

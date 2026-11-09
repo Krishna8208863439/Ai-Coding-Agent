@@ -121,7 +121,43 @@ projectsRouter.get('/:id/files', requireAuth, async (req: AuthenticatedRequest, 
   res.status(200).json({ files });
 });
 
-// GET /api/projects/:id/files/content — Read specific file content
+// POST /api/projects/:id/files/modify — Update file content
+projectsRouter.post('/:id/files/modify', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { path: filePath, content } = req.body as { path: string; content: string };
+  if (!filePath || content === undefined) {
+    res.status(400).json({ error: 'path and content are required' });
+    return;
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  await WorkspaceManager.writeFile(project.id, filePath, content);
+
+  await prisma.projectFile.upsert({
+    where: {
+      projectId_path: {
+        projectId: project.id,
+        path: filePath,
+      },
+    },
+    update: {
+      size: Buffer.byteLength(content, 'utf8'),
+      updatedAt: new Date(),
+    },
+    create: {
+      projectId: project.id,
+      path: filePath,
+      size: Buffer.byteLength(content, 'utf8'),
+      isDir: false,
+    },
+  });
+
+  res.status(200).json({ success: true, path: filePath });
+});
 projectsRouter.get('/:id/files/content', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const filePath = req.query.path as string;
   if (!filePath) {
