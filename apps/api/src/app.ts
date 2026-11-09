@@ -10,6 +10,7 @@ import { providersRouter } from './routes/providers';
 import { chatRouter } from './routes/chat';
 import { projectsRouter } from './routes/projects';
 import { agentsRouter } from './routes/agents';
+import { terminalRouter } from './routes/terminal';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -35,7 +36,7 @@ const startTime = Date.now();
 app.get('/api/health', (_req: Request, res: Response) => {
   const health: SystemHealth = {
     status: 'healthy',
-    version: '0.6.0',
+    version: '0.8.0',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     uptime: Math.floor((Date.now() - startTime) / 1000),
@@ -46,17 +47,17 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // Phase status
 app.get('/api/phases', (_req: Request, res: Response) => {
   res.status(200).json({
-    activePhase: 6,
-    phaseName: 'Multi-Agent Orchestration',
+    activePhase: 8,
+    phaseName: 'Sandbox and Execution',
     allPhases: [
       { phase: 1, name: 'Foundation and UI', status: 'COMPLETE' },
       { phase: 2, name: 'Authentication and Database', status: 'COMPLETE' },
       { phase: 3, name: 'API Manager and Model Library', status: 'COMPLETE' },
       { phase: 4, name: 'AI Chat and Streaming', status: 'COMPLETE' },
       { phase: 5, name: 'Project Generation', status: 'COMPLETE' },
-      { phase: 6, name: 'Multi-Agent Orchestration', status: 'ACTIVE' },
-      { phase: 7, name: 'Advanced IDE', status: 'LOCKED' },
-      { phase: 8, name: 'Sandbox and Execution', status: 'LOCKED' },
+      { phase: 6, name: 'Multi-Agent Orchestration', status: 'COMPLETE' },
+      { phase: 7, name: 'Advanced IDE', status: 'COMPLETE' },
+      { phase: 8, name: 'Sandbox and Execution', status: 'ACTIVE' },
       { phase: 9, name: 'Testing and Debugging', status: 'LOCKED' },
       { phase: 10, name: 'GitHub, Export and Production', status: 'LOCKED' },
     ],
@@ -69,3 +70,4 @@ app.use('/api/providers', providersRouter);
 app.use('/api/chat', chatRouter);
 app.use('/api/projects', projectsRouter);
 app.use('/api/agents', agentsRouter);
+app.use('/api/terminal', terminalRouter);

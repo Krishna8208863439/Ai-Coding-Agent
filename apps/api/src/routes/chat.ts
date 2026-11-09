@@ -167,3 +167,4 @@ chatRouter.post('/stream', requireAuth, async (req: AuthenticatedRequest, res: R
   res.write(`data: ${JSON.stringify({ type: 'done', fullContent: assistantResponse })}\n\n`);
   res.end();
 });
+

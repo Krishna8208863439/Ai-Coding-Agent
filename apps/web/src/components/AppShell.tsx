@@ -34,7 +34,7 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'API Manager', to: '/api-manager', icon: Cpu },
   { name: 'Model Library', to: '/models', icon: Library },
   { name: 'Project Explorer', to: '/explorer', icon: FolderTree },
-  { name: 'Terminal', to: '/terminal', icon: Terminal, phaseRequired: 8 },
+  { name: 'Terminal', to: '/terminal', icon: Terminal },
   { name: 'GitHub', to: '/github', icon: GitBranch, phaseRequired: 10 },
   { name: 'Settings', to: '/settings', icon: Settings },
 ];
@@ -82,10 +82,10 @@ export function AppShell() {
         <div className="border-b border-[#1f2433] px-4 py-3 bg-[#131620]/50">
           <div className="flex items-center justify-between text-xs">
             <span className="text-neutral-400 font-medium">Platform Stage</span>
-            <Badge variant="info">Phase 7 Active</Badge>
+            <Badge variant="info">Phase 8 Active</Badge>
           </div>
           <p className="mt-1 text-[11px] text-neutral-400 leading-tight">
-            Advanced AI IDE Workspace Architecture
+            Sandbox & Terminal Architecture
           </p>
         </div>
 

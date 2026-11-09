@@ -69,3 +69,4 @@ export const useChatStore = create<ChatState>((set) => ({
   setAbortController: (abortController) => set({ abortController }),
   resetChat: () => set({ currentConversationId: null, messages: [], isStreaming: false }),
 }));
+
