@@ -12,6 +12,7 @@ import { AIAgents } from './pages/AIAgents';
 import { AIWorkspace } from './pages/AIWorkspace';
 import { TerminalPage } from './pages/TerminalPage';
 import { TestingDashboard } from './pages/TestingDashboard';
+import { GitHubPage } from './pages/GitHubPage';
 
 export default function App() {
   return (
@@ -27,22 +28,7 @@ export default function App() {
         <Route path="/explorer" element={<ProjectExplorer />} />
         <Route path="/terminal" element={<TerminalPage />} />
         <Route path="/testing" element={<TestingDashboard />} />
-        <Route
-          path="/github"
-          element={
-            <ComingSoon
-              title="Git & GitHub Integration"
-              phase={10}
-              description="OAuth account connection, repository creation, branch management, push/pull controls."
-              plannedFeatures={[
-                'GitHub OAuth integration',
-                'Remote repository push/pull with approval',
-                'Commit history viewer',
-                'Branch switching & diff analysis',
-              ]}
-            />
-          }
-        />
+        <Route path="/github" element={<GitHubPage />} />
         <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
