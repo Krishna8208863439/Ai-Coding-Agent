@@ -8,6 +8,7 @@ import { ModelLibrary } from './pages/ModelLibrary';
 import { AIChat } from './pages/AIChat';
 import { NewProject } from './pages/NewProject';
 import { ProjectExplorer } from './pages/ProjectExplorer';
+import { AIAgents } from './pages/AIAgents';
 
 export default function App() {
   return (
@@ -31,22 +32,7 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/agents"
-          element={
-            <ComingSoon
-              title="Autonomous AI Agent System"
-              phase={6}
-              description="7 synchronized engineering roles (Architect, Developer, Debugger, Tester, UI/UX, Security, PM)."
-              plannedFeatures={[
-                'Autonomous multi-agent execution pipeline',
-                'Interactive task board & timeline',
-                'Human-in-the-loop action approvals',
-                'WebSocket real-time streaming',
-              ]}
-            />
-          }
-        />
+        <Route path="/agents" element={<AIAgents />} />
         <Route path="/api-manager" element={<ApiManager />} />
         <Route path="/models" element={<ModelLibrary />} />
         <Route path="/chat" element={<AIChat />} />

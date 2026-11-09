@@ -16,6 +16,7 @@
   "dependencies": {
     "@nexora/shared": "workspace:*",
     "@nexora/providers": "workspace:*",
+    "@nexora/agents": "workspace:*",
     "@prisma/client": "^6.2.1",
     "argon2": "^0.41.1",
     "cookie-parser": "^1.4.7",
