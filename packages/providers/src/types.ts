@@ -7,10 +7,23 @@ export interface ProviderConnectionTestResult {
   error?: string;
 }
 
+export interface StreamChunk {
+  content: string;
+  isComplete: boolean;
+  tokensEstimate?: number;
+}
+
 export interface LLMProvider {
   type: LLMProviderType;
   testConnection(apiKey: string, endpoint?: string): Promise<ProviderConnectionTestResult>;
   listModels(apiKey: string, endpoint?: string): Promise<ModelInfo[]>;
+  streamChat?(
+    messages: Array<{ role: string; content: string }>,
+    model: string,
+    apiKey: string,
+    endpoint?: string,
+    onChunk?: (chunk: string) => void
+  ): Promise<string>;
 }
 
 // Fallback catalog when live discovery is unconfigured/offline
@@ -56,3 +69,4 @@ export const FALLBACK_MODELS: Record<LLMProviderType, ModelInfo[]> = {
     { id: 'custom-model', name: 'Custom OpenAI-Compatible Endpoint', provider: 'custom', contextWindow: 32768, supportsTools: true, supportsVision: false, isDefault: true },
   ],
 };
+

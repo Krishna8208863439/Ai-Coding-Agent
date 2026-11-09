@@ -14,6 +14,7 @@ import {
   Menu,
   X,
   ShieldCheck,
+  MessageSquare,
 } from 'lucide-react';
 import { Badge } from '@nexora/ui';
 
@@ -26,6 +27,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { name: 'Dashboard', to: '/', icon: LayoutDashboard },
+  { name: 'AI Chat', to: '/chat', icon: MessageSquare },
   { name: 'New Project', to: '/new-project', icon: FolderPlus, phaseRequired: 5 },
   { name: 'AI Workspace', to: '/workspace', icon: Code2, phaseRequired: 7 },
   { name: 'AI Agents', to: '/agents', icon: Bot, phaseRequired: 6 },
@@ -80,10 +82,10 @@ export function AppShell() {
         <div className="border-b border-[#1f2433] px-4 py-3 bg-[#131620]/50">
           <div className="flex items-center justify-between text-xs">
             <span className="text-neutral-400 font-medium">Platform Stage</span>
-            <Badge variant="info">Phase 3 Active</Badge>
+            <Badge variant="info">Phase 4 Active</Badge>
           </div>
           <p className="mt-1 text-[11px] text-neutral-400 leading-tight">
-            API Manager & Model Library Architecture
+            AI Chat & Streaming Architecture
           </p>
         </div>
 

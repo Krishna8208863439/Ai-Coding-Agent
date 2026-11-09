@@ -7,6 +7,7 @@ import { pinoHttp } from 'pino-http';
 import { SystemHealth } from '@nexora/shared';
 import { authRouter } from './routes/auth';
 import { providersRouter } from './routes/providers';
+import { chatRouter } from './routes/chat';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -32,7 +33,7 @@ const startTime = Date.now();
 app.get('/api/health', (_req: Request, res: Response) => {
   const health: SystemHealth = {
     status: 'healthy',
-    version: '0.3.0',
+    version: '0.4.0',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     uptime: Math.floor((Date.now() - startTime) / 1000),
@@ -43,13 +44,13 @@ app.get('/api/health', (_req: Request, res: Response) => {
 // Phase status
 app.get('/api/phases', (_req: Request, res: Response) => {
   res.status(200).json({
-    activePhase: 3,
-    phaseName: 'API Manager and Model Library',
+    activePhase: 4,
+    phaseName: 'AI Chat and Streaming',
     allPhases: [
       { phase: 1, name: 'Foundation and UI', status: 'COMPLETE' },
       { phase: 2, name: 'Authentication and Database', status: 'COMPLETE' },
-      { phase: 3, name: 'API Manager and Model Library', status: 'ACTIVE' },
-      { phase: 4, name: 'AI Chat and Streaming', status: 'LOCKED' },
+      { phase: 3, name: 'API Manager and Model Library', status: 'COMPLETE' },
+      { phase: 4, name: 'AI Chat and Streaming', status: 'ACTIVE' },
       { phase: 5, name: 'Project Generation', status: 'LOCKED' },
       { phase: 6, name: 'Multi-Agent Orchestration', status: 'LOCKED' },
       { phase: 7, name: 'Advanced IDE', status: 'LOCKED' },
@@ -60,6 +61,7 @@ app.get('/api/phases', (_req: Request, res: Response) => {
   });
 });
 
-// Auth routes
+// Routes
 app.use('/api/auth', authRouter);
 app.use('/api/providers', providersRouter);
+app.use('/api/chat', chatRouter);

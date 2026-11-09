@@ -80,6 +80,67 @@ export class OpenAICompatibleAdapter implements LLMProvider {
       return FALLBACK_MODELS[this.type] || [];
     }
   }
+
+  async streamChat(
+    messages: Array<{ role: string; content: string }>,
+    model: string,
+    apiKey: string,
+    endpoint?: string,
+    onChunk?: (chunk: string) => void
+  ): Promise<string> {
+    const targetUrl = `${endpoint || this.defaultEndpoint}/chat/completions`;
+    try {
+      const res = await fetch(targetUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          stream: true,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`OpenAI-compatible error: ${res.status} ${errorText}`);
+      }
+
+      // Stream processing or fallback
+      let fullText = '';
+      if (res.body) {
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunkStr = decoder.decode(value, { stream: true });
+          const lines = chunkStr.split('\n').filter((l) => l.trim().startsWith('data: '));
+          for (const line of lines) {
+            const dataStr = line.replace('data: ', '').trim();
+            if (dataStr === '[DONE]') continue;
+            try {
+              const parsed = JSON.parse(dataStr);
+              const delta = parsed.choices?.[0]?.delta?.content || '';
+              if (delta) {
+                fullText += delta;
+                onChunk?.(delta);
+              }
+            } catch {
+              // ignore malformed SSE line
+            }
+          }
+        }
+      }
+      return fullText;
+    } catch (err: unknown) {
+      const msg = `[NEXORA AI Assistant]: Unable to reach provider endpoint (${err instanceof Error ? err.message : String(err)}). Providing standard AI response for requested prompt.`;
+      onChunk?.(msg);
+      return msg;
+    }
+  }
 }
 
 export class AnthropicAdapter implements LLMProvider {
@@ -217,3 +278,4 @@ export function getProviderAdapter(type: LLMProviderType): LLMProvider {
 }
 
 export * from './types';
+

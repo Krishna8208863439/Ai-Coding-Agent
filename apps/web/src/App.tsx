@@ -5,6 +5,7 @@ import { ComingSoon } from './pages/ComingSoon';
 import { Settings } from './pages/Settings';
 import { ApiManager } from './pages/ApiManager';
 import { ModelLibrary } from './pages/ModelLibrary';
+import { AIChat } from './pages/AIChat';
 
 export default function App() {
   return (
@@ -61,6 +62,7 @@ export default function App() {
         />
         <Route path="/api-manager" element={<ApiManager />} />
         <Route path="/models" element={<ModelLibrary />} />
+        <Route path="/chat" element={<AIChat />} />
         <Route
           path="/explorer"
           element={
