@@ -7,3 +7,4 @@ describe('@nexora/web App Shell', () => {
     expect(typeof 'nexora-web').toBe('string');
   });
 });
+

@@ -1,9 +1,11 @@
 import express, { Request, Response, Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
 import pino from 'pino';
 import { pinoHttp } from 'pino-http';
 import { SystemHealth } from '@nexora/shared';
+import { authRouter } from './routes/auth';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -11,6 +13,7 @@ export const logger = pino({
 
 export const app: Express = express();
 
+app.set('trust proxy', 1);
 app.use(helmet());
 app.use(
   cors({
@@ -19,15 +22,16 @@ app.use(
   })
 );
 app.use(express.json());
+app.use(cookieParser());
 app.use(pinoHttp({ logger }));
 
 const startTime = Date.now();
 
-// Health check endpoint
+// Health check
 app.get('/api/health', (_req: Request, res: Response) => {
   const health: SystemHealth = {
     status: 'healthy',
-    version: '0.1.0',
+    version: '0.2.0',
     environment: process.env.NODE_ENV || 'development',
     timestamp: new Date().toISOString(),
     uptime: Math.floor((Date.now() - startTime) / 1000),
@@ -35,14 +39,14 @@ app.get('/api/health', (_req: Request, res: Response) => {
   res.status(200).json(health);
 });
 
-// Phase status endpoint
+// Phase status
 app.get('/api/phases', (_req: Request, res: Response) => {
   res.status(200).json({
-    activePhase: 1,
-    phaseName: 'Foundation and UI Architecture',
+    activePhase: 2,
+    phaseName: 'Authentication and Database',
     allPhases: [
-      { phase: 1, name: 'Foundation and UI', status: 'ACTIVE' },
-      { phase: 2, name: 'Authentication and Database', status: 'LOCKED' },
+      { phase: 1, name: 'Foundation and UI', status: 'COMPLETE' },
+      { phase: 2, name: 'Authentication and Database', status: 'ACTIVE' },
       { phase: 3, name: 'API Manager and Model Library', status: 'LOCKED' },
       { phase: 4, name: 'AI Chat and Streaming', status: 'LOCKED' },
       { phase: 5, name: 'Project Generation', status: 'LOCKED' },
@@ -54,3 +58,6 @@ app.get('/api/phases', (_req: Request, res: Response) => {
     ],
   });
 });
+
+// Auth routes
+app.use('/api/auth', authRouter);

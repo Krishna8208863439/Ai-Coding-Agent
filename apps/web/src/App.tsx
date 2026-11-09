@@ -2,6 +2,7 @@ import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { ComingSoon } from './pages/ComingSoon';
+import { Settings } from './pages/Settings';
 
 export default function App() {
   return (
@@ -136,24 +137,8 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/settings"
-          element={
-            <ComingSoon
-              title="Platform Settings & Authentication"
-              phase={2}
-              description="User credentials, Argon2id security, JWT sessions, theme preferences, and audit logs."
-              plannedFeatures={[
-                'User profile and authentication',
-                'Argon2id password hashing & JWT tokens',
-                'Audit logging review',
-                'Session and security preferences',
-              ]}
-            />
-          }
-        />
+        <Route path="/settings" element={<Settings />} />
       </Route>
     </Routes>
   );
 }
-
