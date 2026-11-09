@@ -6,28 +6,15 @@ import { Settings } from './pages/Settings';
 import { ApiManager } from './pages/ApiManager';
 import { ModelLibrary } from './pages/ModelLibrary';
 import { AIChat } from './pages/AIChat';
+import { NewProject } from './pages/NewProject';
+import { ProjectExplorer } from './pages/ProjectExplorer';
 
 export default function App() {
   return (
     <Routes>
       <Route element={<AppShell />}>
         <Route path="/" element={<Dashboard />} />
-        <Route
-          path="/new-project"
-          element={
-            <ComingSoon
-              title="Prompt-to-Project Generation"
-              phase={5}
-              description="Natural language project requirement parser, architecture generator, and template builder."
-              plannedFeatures={[
-                'Multi-stack project scaffolder',
-                'Requirements clarification prompt flow',
-                'Automated file creation',
-                'Database schema generation',
-              ]}
-            />
-          }
-        />
+        <Route path="/new-project" element={<NewProject />} />
         <Route
           path="/workspace"
           element={
@@ -63,22 +50,7 @@ export default function App() {
         <Route path="/api-manager" element={<ApiManager />} />
         <Route path="/models" element={<ModelLibrary />} />
         <Route path="/chat" element={<AIChat />} />
-        <Route
-          path="/explorer"
-          element={
-            <ComingSoon
-              title="Project Explorer"
-              phase={5}
-              description="Browse and manage project directories, files, and generated solution trees."
-              plannedFeatures={[
-                'File tree navigation',
-                'File creation and rename',
-                'Git status badges',
-                'Per-project workspace isolation',
-              ]}
-            />
-          }
-        />
+        <Route path="/explorer" element={<ProjectExplorer />} />
         <Route
           path="/terminal"
           element={
