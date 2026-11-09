@@ -3,6 +3,8 @@ import { AppShell } from './components/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { ComingSoon } from './pages/ComingSoon';
 import { Settings } from './pages/Settings';
+import { ApiManager } from './pages/ApiManager';
+import { ModelLibrary } from './pages/ModelLibrary';
 
 export default function App() {
   return (
@@ -57,38 +59,8 @@ export default function App() {
             />
           }
         />
-        <Route
-          path="/api-manager"
-          element={
-            <ComingSoon
-              title="Multi-Provider API Management Center"
-              phase={3}
-              description="Manage OpenAI, Anthropic, Gemini, Groq, Ollama, and custom endpoints with AES-256 encryption."
-              plannedFeatures={[
-                'AES-256-GCM encrypted credential vault',
-                'Connection health testing',
-                'Live model endpoint discovery',
-                'Rate limit & token parameter controls',
-              ]}
-            />
-          }
-        />
-        <Route
-          path="/models"
-          element={
-            <ComingSoon
-              title="AI Model Library"
-              phase={3}
-              description="Explore discovered models, compare context limits, tool capabilities, and select defaults."
-              plannedFeatures={[
-                'Live discovered model catalog',
-                'Context window & capability filters',
-                'Default model assignment',
-                'Dynamic model switcher',
-              ]}
-            />
-          }
-        />
+        <Route path="/api-manager" element={<ApiManager />} />
+        <Route path="/models" element={<ModelLibrary />} />
         <Route
           path="/explorer"
           element={

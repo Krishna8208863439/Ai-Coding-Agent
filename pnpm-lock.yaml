@@ -178,6 +178,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@nexora/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@nexora/shared':
         specifier: workspace:*
         version: link:../../packages/shared
@@ -306,6 +309,19 @@ importers:
       vite:
         specifier: ^6.1.0
         version: 6.4.5(@types/node@20.19.43)(jiti@1.21.7)(tsx@4.23.15)
+      vitest:
+        specifier: ^3.0.5
+        version: 3.2.7(@types/node@20.19.43)(jiti@1.21.7)(tsx@4.23.15)
+
+  packages/providers:
+    dependencies:
+      '@nexora/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      typescript:
+        specifier: ^5.7.3
+        version: 5.9.3
       vitest:
         specifier: ^3.0.5
         version: 3.2.7(@types/node@20.19.43)(jiti@1.21.7)(tsx@4.23.15)

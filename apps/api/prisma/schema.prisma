@@ -21,9 +21,33 @@ model User {
 
   refreshTokens RefreshToken[]
   auditLogs     AuditLog[]
+  providerConfigs ProviderConfig[]
 
   @@index([email])
   @@map("users")
+}
+
+model ProviderConfig {
+  id             String   @id @default(cuid())
+  userId         String
+  provider       String   // openai, gemini, anthropic, groq, mistral, deepseek, ollama, custom
+  name           String
+  endpoint       String?
+  encryptedApiKey String?
+  iv             String?
+  authTag        String?
+  maskedApiKey   String?
+  isDefault      Boolean  @default(false)
+  status         String   @default("UNVERIFIED") // CONNECTED, ERROR, UNVERIFIED
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider, name])
+  @@index([userId])
+  @@map("provider_configs")
 }
 
 model RefreshToken {
