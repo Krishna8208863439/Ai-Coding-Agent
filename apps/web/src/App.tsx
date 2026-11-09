@@ -11,6 +11,7 @@ import { ProjectExplorer } from './pages/ProjectExplorer';
 import { AIAgents } from './pages/AIAgents';
 import { AIWorkspace } from './pages/AIWorkspace';
 import { TerminalPage } from './pages/TerminalPage';
+import { TestingDashboard } from './pages/TestingDashboard';
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/chat" element={<AIChat />} />
         <Route path="/explorer" element={<ProjectExplorer />} />
         <Route path="/terminal" element={<TerminalPage />} />
+        <Route path="/testing" element={<TestingDashboard />} />
         <Route
           path="/github"
           element={

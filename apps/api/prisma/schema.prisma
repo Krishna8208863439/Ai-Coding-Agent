@@ -206,6 +206,62 @@ model RefreshToken {
   @@map("refresh_tokens")
 }
 
+model TestRun {
+  id          String     @id @default(cuid())
+  projectId   String
+  userId      String
+  status      String     @default("PENDING") // PENDING, RUNNING, PASSED, FAILED, ERROR
+  framework   String     @default("vitest") // vitest, pytest, jest, junit
+  totalTests  Int        @default(0)
+  passed      Int        @default(0)
+  failed      Int        @default(0)
+  skipped     Int        @default(0)
+  durationMs  Int        @default(0)
+  stdout      String?
+  stderr      String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  cases       TestCase[]
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("test_runs")
+}
+
+model TestCase {
+  id         String   @id @default(cuid())
+  runId      String
+  name       String
+  suite      String?
+  status     String   @default("PASSED") // PASSED, FAILED, SKIPPED
+  durationMs Int      @default(0)
+  errorMsg   String?
+  stackTrace String?
+  createdAt  DateTime @default(now())
+
+  run TestRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("test_cases")
+}
+
+model DebugSession {
+  id          String   @id @default(cuid())
+  projectId   String
+  userId      String
+  errorMsg    String
+  stackTrace  String?
+  suggestion  String?
+  resolved    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([projectId])
+  @@index([userId])
+  @@map("debug_sessions")
+}
+
 model AuditLog {
   id        String   @id @default(cuid())
   userId    String?
