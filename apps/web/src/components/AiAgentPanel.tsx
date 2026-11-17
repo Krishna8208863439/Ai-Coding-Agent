@@ -28,8 +28,13 @@ import {
   Layers,
   ArrowUp,
   SlidersHorizontal,
+  Wrench,
+  ShieldAlert,
+  Loader2,
+  Activity,
+  Workflow,
 } from 'lucide-react';
-import { useChatStore, ChatMessage } from '../store/chatStore';
+import { useChatStore, ChatMessage, ToolCallItem, ApprovalItem } from '../store/chatStore';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
 
@@ -50,13 +55,13 @@ const AVAILABLE_MODELS = [
 ];
 
 const AGENT_ROLES = [
-  { id: 'ARCHITECT', name: 'Architect Agent', desc: 'System design, requirements, stack selection' },
-  { id: 'DEVELOPER', name: 'Developer Agent', desc: 'Code writing, implementation, refactoring' },
-  { id: 'DEBUGGER', name: 'Debugger Agent', desc: 'Stack traces, root cause analysis, fixes' },
-  { id: 'TESTER', name: 'Tester Agent', desc: 'Unit tests, end-to-end coverage, suites' },
-  { id: 'SECURITY', name: 'Security Agent', desc: 'Vulnerability scan, secret leakage check' },
-  { id: 'UI_UX', name: 'UI/UX Agent', desc: 'Design tokens, contrast, responsiveness' },
-  { id: 'PROJECT_MANAGER', name: 'Project Manager', desc: 'Milestone tracking, approval coordination' },
+  { id: 'ARCHITECT', name: 'Architect Agent', desc: 'System design, requirements, stack selection', icon: '📐' },
+  { id: 'DEVELOPER', name: 'Developer Agent', desc: 'Code writing, implementation, refactoring', icon: '💻' },
+  { id: 'DEBUGGER', name: 'Debugger Agent', desc: 'Stack traces, root cause analysis, fixes', icon: '🔍' },
+  { id: 'TESTER', name: 'Tester Agent', desc: 'Unit tests, end-to-end coverage, suites', icon: '🧪' },
+  { id: 'SECURITY', name: 'Security Agent', desc: 'Vulnerability scan, secret leakage check', icon: '🛡️' },
+  { id: 'UI_UX', name: 'UI/UX Agent', desc: 'Design tokens, contrast, responsiveness', icon: '🎨' },
+  { id: 'PROJECT_MANAGER', name: 'Project Manager', desc: 'Milestone tracking, approval coordination', icon: '📋' },
 ];
 
 const MENTION_OPTIONS = [
@@ -73,6 +78,7 @@ const SLASH_COMMANDS = [
   { cmd: '/fix', desc: 'Diagnose and propose fixes for open compiler issues' },
   { cmd: '/test', desc: 'Generate test cases for current open file' },
   { cmd: '/plan', desc: 'Create detailed step-by-step implementation plan' },
+  { cmd: '/autonomous', desc: 'Toggle 7-agent autonomous chain mode' },
   { cmd: '/model', desc: 'Open the model switch picker' },
   { cmd: '/agents', desc: 'Switch specialized engineering agent role' },
   { cmd: '/help', desc: 'Display all available agent commands and shortcuts' },
@@ -80,7 +86,7 @@ const SLASH_COMMANDS = [
 
 export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanelProps) {
   const { accessToken } = useAuthStore();
-  const { activeTabPath, openTabs, updateTabContent } = useIdeStore();
+  const { activeTabPath, openTabs, updateTabContent, currentProjectId } = useIdeStore();
   const {
     conversations,
     currentConversationId,
@@ -89,6 +95,8 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     selectedModel,
     selectedProvider,
     selectedRole,
+    executionMode,
+    recentActivities,
     attachments,
     searchQuery,
     isMaximized,
@@ -101,6 +109,8 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     setSelectedModel,
     setSelectedProvider,
     setSelectedRole,
+    setExecutionMode,
+    addActivityEvent,
     setAbortController,
     addAttachment,
     removeAttachment,
@@ -117,8 +127,10 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showOptionsMenu, setShowOptionsMenu] = useState(false);
   const [showSearchInput, setShowSearchInput] = useState(false);
+  const [showActivityFeed, setShowActivityFeed] = useState(false);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
+  const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -128,54 +140,68 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     if (activeRole) setSelectedRole(activeRole);
   }, [activeRole]);
 
-  // Load conversations on mount
+  // Load conversations and pending approvals on mount
   useEffect(() => {
-    const fetchConversations = async () => {
+    const fetchInitialData = async () => {
       if (!accessToken) return;
       try {
-        const res = await fetch('/api/chat/conversations', {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
+        const [convRes, appRes] = await Promise.all([
+          fetch('/api/chat/conversations', { headers: { Authorization: `Bearer ${accessToken}` } }),
+          fetch('/api/agents/approvals', { headers: { Authorization: `Bearer ${accessToken}` } }),
+        ]);
+
+        if (convRes.ok) {
+          const data = await convRes.json();
           setConversations(data.conversations || []);
+        }
+
+        if (appRes.ok) {
+          const data = await appRes.json();
+          if (data.approvals) {
+            setPendingApprovals(
+              data.approvals.map((a: any) => ({
+                id: a.id,
+                action: a.actionType,
+                target: a.details?.tool || a.details?.input?.path || 'Action',
+                risk: a.actionType === 'FILE_DELETE' ? 'high' : 'medium',
+                tool: a.details?.tool,
+                details: a.details,
+                status: 'pending',
+              }))
+            );
+          }
         }
       } catch {}
     };
-    fetchConversations();
+    fetchInitialData();
   }, [accessToken]);
 
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isStreaming]);
+  }, [messages, isStreaming, recentActivities]);
 
   // Handle Input typing and @ / triggers
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputPrompt(val);
 
-    // Auto-resize
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 180)}px`;
     }
 
-    // Check for @ mentions
     const lastAt = val.lastIndexOf('@');
     if (lastAt !== -1 && (lastAt === 0 || val[lastAt - 1] === ' ')) {
-      const q = val.slice(lastAt).toLowerCase();
-      setMentionQuery(q);
+      setMentionQuery(val.slice(lastAt).toLowerCase());
       setSlashQuery(null);
     } else {
       setMentionQuery(null);
     }
 
-    // Check for / commands
     const lastSlash = val.lastIndexOf('/');
     if (lastSlash !== -1 && (lastSlash === 0 || val[lastSlash - 1] === ' ')) {
-      const q = val.slice(lastSlash).toLowerCase();
-      setSlashQuery(q);
+      setSlashQuery(val.slice(lastSlash).toLowerCase());
       setMentionQuery(null);
     } else {
       setSlashQuery(null);
@@ -195,6 +221,11 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       setInputPrompt('');
       return;
     }
+    if (cmd === '/autonomous') {
+      setExecutionMode(executionMode === 'autonomous' ? 'single' : 'autonomous');
+      setInputPrompt('');
+      return;
+    }
     if (cmd === '/model') {
       setShowModelPicker(true);
       setInputPrompt('');
@@ -208,13 +239,12 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     if (cmd === '/help') {
       addMessage({
         role: 'system',
-        content: `**NEXORA AI Command Reference:**\n\n- \`/new\`: Start a new conversation\n- \`/clear\`: Clear chat history\n- \`/fix\`: Propose compiler & lint error fixes\n- \`/test\`: Generate unit test suite\n- \`/plan\`: Formulate architecture plan\n- \`/model\`: Switch LLM model\n- \`/agents\`: Switch engineering role`,
+        content: `**NEXORA AI Command Reference:**\n\n- \`/new\`: Start a new conversation\n- \`/clear\`: Clear chat history\n- \`/autonomous\`: Toggle 7-agent chain mode\n- \`/fix\`: Propose compiler & lint error fixes\n- \`/test\`: Generate unit test suite\n- \`/plan\`: Formulate architecture plan\n- \`/model\`: Switch LLM model\n- \`/agents\`: Switch engineering role`,
       });
       setInputPrompt('');
       return;
     }
 
-    // Otherwise insert command into prompt
     setInputPrompt(`${cmd} `);
   };
 
@@ -231,14 +261,36 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       addAttachment(tag);
     }
 
-    // Remove the trailing @ from prompt
     const lastAt = inputPrompt.lastIndexOf('@');
     if (lastAt !== -1) {
       setInputPrompt(inputPrompt.slice(0, lastAt).trim());
     }
   };
 
-  // Send Message
+  // Human Approval Resolution
+  const handleApprovalDecision = async (approvalId: string, decision: 'APPROVE' | 'REJECT') => {
+    if (!accessToken) return;
+    try {
+      const res = await fetch(`/api/agents/approvals/${approvalId}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ decision }),
+      });
+
+      if (res.ok) {
+        setPendingApprovals((prev) => prev.filter((a) => a.id !== approvalId));
+        addMessage({
+          role: 'system',
+          content: `🛡️ Human decision recorded: **${decision}** for approval \`${approvalId}\`. Agent execution resuming.`,
+        });
+      }
+    } catch {}
+  };
+
+  // Send Message (Dual mode: Chat or Autonomous Multi-Agent Run)
   const handleSend = async () => {
     if (!inputPrompt.trim() || isStreaming) return;
 
@@ -256,20 +308,105 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       content: promptText,
       timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
     };
-
     addMessage(userMessage);
-
-    // Initial empty assistant message for streaming
-    const assistantMessage: ChatMessage = {
-      role: 'assistant',
-      content: '',
-      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-    addMessage(assistantMessage);
 
     setIsStreaming(true);
     const controller = new AbortController();
     setAbortController(controller);
+
+    // If autonomous chain is active, run the full 7-agent engine via /api/agents/runs
+    if (executionMode === 'autonomous' && currentProjectId) {
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: `🚀 **Initiating Autonomous 7-Agent Sequence**\n\n- Mode: **Autonomous Full Pipeline**\n- Project ID: \`${currentProjectId}\`\n- Architecture Chain: \`Architect → Developer → Tester → Debugger → Security → UI/UX → PM\`\n\n`,
+        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        agentRole: 'ARCHITECT',
+      };
+      addMessage(assistantMessage);
+
+      try {
+        const res = await fetch('/api/agents/runs', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+          },
+          body: JSON.stringify({
+            projectId: currentProjectId,
+            prompt: promptText,
+            agentRole: selectedRole,
+            mode: 'autonomous',
+            model: selectedModel,
+            provider: selectedProvider,
+          }),
+          signal: controller.signal,
+        });
+
+        if (!res.ok) throw new Error(`Agent run failed with status ${res.status}`);
+
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+
+        if (reader) {
+          let buffer = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n\n');
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const ev = JSON.parse(line.slice(6));
+                  addActivityEvent(ev);
+
+                  if (ev.type === 'agent_switch') {
+                    updateLastMessage(`\n\n### 🤖 Agent: ${ev.agentName} (\`${ev.agent}\`)\n`);
+                  } else if (ev.type === 'tool_complete') {
+                    updateLastMessage(`\n- **[${ev.tool}]** ${ev.thought}\n  \`\`\`\n  ${(ev.output || '').slice(0, 150)}\n  \`\`\``);
+                  } else if (ev.type === 'approval') {
+                    setPendingApprovals((prev) => [
+                      ...prev,
+                      {
+                        id: ev.approvalId,
+                        action: ev.actionType,
+                        target: ev.tool || 'Resource',
+                        risk: ev.actionType === 'FILE_DELETE' ? 'high' : 'medium',
+                        tool: ev.tool,
+                        details: ev.details,
+                        status: 'pending',
+                      },
+                    ]);
+                  } else if (ev.type === 'run_complete') {
+                    updateLastMessage(`\n\n✅ **Autonomous Sequence Completed** (${ev.stepCount} steps executed across 7 agents).`);
+                  }
+                } catch {}
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        if (err.name !== 'AbortError') {
+          updateLastMessage(`\n\n*[Autonomous execution interrupted: ${err.message}]*`);
+        }
+      } finally {
+        setIsStreaming(false);
+        setAbortController(null);
+      }
+      return;
+    }
+
+    // Standard streaming chat flow
+    const assistantMessage: ChatMessage = {
+      role: 'assistant',
+      content: '',
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      agentRole: selectedRole,
+    };
+    addMessage(assistantMessage);
 
     try {
       const res = await fetch('/api/chat/stream', {
@@ -289,9 +426,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         signal: controller.signal,
       });
 
-      if (!res.ok) {
-        throw new Error(`Server returned HTTP ${res.status}`);
-      }
+      if (!res.ok) throw new Error(`Server returned HTTP ${res.status}`);
 
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
@@ -314,8 +449,6 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                   setCurrentConversationId(event.conversationId);
                 } else if (event.type === 'delta' && event.chunk) {
                   updateLastMessage(event.chunk);
-                } else if (event.type === 'done') {
-                  // Completed
                 }
               } catch {}
             }
@@ -358,7 +491,6 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     }
   };
 
-  // Filter messages by search query if search is open
   const displayedMessages = searchQuery.trim()
     ? messages.filter((m) => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
     : messages;
@@ -369,12 +501,12 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
   return (
     <aside
       className={`h-full bg-[#171717] border-l border-[#2e2e2e] flex flex-col justify-between transition-all duration-200 z-30 select-none ${
-        isMaximized ? 'w-[750px]' : 'w-[420px]'
+        isMaximized ? 'w-[750px]' : 'w-[430px]'
       }`}
     >
       {/* 1. TOP HEADER */}
       <div className="h-11 bg-[#191919] border-b border-[#2e2e2e] px-3 flex items-center justify-between text-neutral-300">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1.5">
           {/* Agent Role Badge */}
           <button
             onClick={() => setShowAgentPicker((prev) => !prev)}
@@ -384,10 +516,35 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             <span>{selectedRole}</span>
             <ChevronDown className="w-3 h-3 text-neutral-400" />
           </button>
+
+          {/* Autonomous Mode Toggle */}
+          <button
+            onClick={() => setExecutionMode(executionMode === 'autonomous' ? 'single' : 'autonomous')}
+            title={executionMode === 'autonomous' ? 'Autonomous chain active (7 agents)' : 'Single agent active'}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
+              executionMode === 'autonomous'
+                ? 'bg-cyan-950/60 border-cyan-700/70 text-cyan-300'
+                : 'bg-[#222] border-[#333] text-neutral-400 hover:text-neutral-200'
+            }`}
+          >
+            <Workflow className="w-3 h-3 text-cyan-400" />
+            <span>{executionMode === 'autonomous' ? '7-Agent Chain' : 'Single'}</span>
+          </button>
         </div>
 
         {/* Action Controls */}
         <div className="flex items-center gap-1">
+          {/* Activity Feed Toggle */}
+          <button
+            onClick={() => setShowActivityFeed((prev) => !prev)}
+            title="Toggle Agent Activity Timeline"
+            className={`p-1.5 rounded hover:bg-[#262626] text-neutral-400 hover:text-neutral-200 transition-colors ${
+              showActivityFeed ? 'bg-[#2a2a2a] text-cyan-400' : ''
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5" />
+          </button>
+
           {/* Search Toggle */}
           <button
             onClick={() => setShowSearchInput((prev) => !prev)}
@@ -421,7 +578,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             )}
           </button>
 
-          {/* Three-Dot Menu */}
+          {/* Options Menu */}
           <div className="relative">
             <button
               onClick={() => setShowOptionsMenu((prev) => !prev)}
@@ -478,7 +635,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       </div>
 
-      {/* Search Input Bar (Conditional) */}
+      {/* Search Input Bar */}
       {showSearchInput && (
         <div className="p-2 border-b border-[#2e2e2e] bg-[#1a1a1a]">
           <div className="relative">
@@ -494,23 +651,77 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       )}
 
+      {/* Human Approval Required Banner (if pending) */}
+      {pendingApprovals.length > 0 && (
+        <div className="p-2.5 bg-amber-950/40 border-b border-amber-800/60 text-xs space-y-2">
+          <div className="flex items-center gap-1.5 text-amber-300 font-medium">
+            <ShieldAlert className="w-4 h-4 text-amber-400" />
+            <span>Human Approval Required ({pendingApprovals.length})</span>
+          </div>
+          {pendingApprovals.map((app) => (
+            <div key={app.id} className="p-2 bg-[#1a1510] border border-amber-900/50 rounded flex items-center justify-between gap-2">
+              <div className="truncate">
+                <span className="font-mono text-[10px] text-amber-400">{app.action}</span>
+                <span className="text-neutral-300 text-[11px] block truncate">{app.target}</span>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                <button
+                  onClick={() => handleApprovalDecision(app.id, 'APPROVE')}
+                  className="px-2 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[10px] font-medium"
+                >
+                  Approve
+                </button>
+                <button
+                  onClick={() => handleApprovalDecision(app.id, 'REJECT')}
+                  className="px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded text-[10px] font-medium"
+                >
+                  Reject
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Activity Timeline Overlay / Toggle View */}
+      {showActivityFeed && recentActivities.length > 0 && (
+        <div className="p-2 border-b border-[#2c2c2c] bg-[#161616] max-h-48 overflow-y-auto space-y-1 text-[11px]">
+          <div className="flex items-center justify-between pb-1 text-[10px] font-semibold text-neutral-400 uppercase">
+            <span>Agent Activity Stream</span>
+            <span className="text-cyan-400">{recentActivities.length} events</span>
+          </div>
+          {recentActivities.map((act, i) => (
+            <div key={i} className="p-1.5 rounded bg-[#1c1c1c] border border-[#282828] flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 truncate">
+                <Bot className="w-3 h-3 text-cyan-400 shrink-0" />
+                <span className="font-semibold text-neutral-200">{act.agent || 'SYSTEM'}</span>
+                <span className="text-neutral-400 truncate">{act.tool || act.thought || act.type}</span>
+              </div>
+              <span className="text-[9px] font-mono text-neutral-500 shrink-0">
+                {act.timestamp ? new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : 'now'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* 2. CONVERSATION FEED (Scrollable) */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-xs">
         {displayedMessages.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-center p-6 text-neutral-500">
             <Sparkles className="w-8 h-8 mb-3 text-cyan-400 opacity-60" />
             <h4 className="text-sm font-semibold text-neutral-300 mb-1">
-              NEXORA Autonomous Agent
+              NEXORA Autonomous Agent System
             </h4>
             <p className="text-xs text-neutral-400 max-w-xs mb-4">
-              Type a prompt or mention code context. I can write modules, run tests, diagnose bugs, and push directly to GitHub.
+              7 specialized agents (Architect, Developer, Tester, Debugger, Security, UI/UX, PM). Ready for autonomous full-lifecycle development.
             </p>
             <div className="grid grid-cols-2 gap-2 text-left w-full max-w-sm">
               <button
-                onClick={() => setInputPrompt('/plan Create an end-to-end authentication flow')}
+                onClick={() => setInputPrompt('/plan Formulate end-to-end fullstack architecture')}
                 className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
               >
-                📐 Plan Auth Flow
+                📐 Plan Fullstack Flow
               </button>
               <button
                 onClick={() => setInputPrompt('/fix Inspect and fix TypeScript compilation errors')}
@@ -525,10 +736,10 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 🧪 Generate Unit Tests
               </button>
               <button
-                onClick={() => setInputPrompt('@workspace Summarize project architecture')}
+                onClick={() => setInputPrompt('@workspace Run security audit and scan for leaked secrets')}
                 className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
               >
-                🌐 Analyze Workspace
+                🛡️ Security Audit
               </button>
             </div>
           </div>
@@ -543,7 +754,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 {/* Author & Timestamp */}
                 <div className="flex items-center gap-2 mb-1 px-1 text-[10px] text-neutral-500">
                   <span className="font-semibold text-neutral-400">
-                    {isUser ? 'You' : `${selectedRole} Agent`}
+                    {isUser ? 'You' : `${msg.agentRole || selectedRole} Agent`}
                   </span>
                   <span>{msg.timestamp || 'Just now'}</span>
                 </div>
@@ -561,7 +772,6 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                     {msg.content.includes('```') ? (
                       msg.content.split('```').map((part, pIdx) => {
                         if (pIdx % 2 === 1) {
-                          // Code block
                           const firstLineEnd = part.indexOf('\n');
                           const lang = firstLineEnd !== -1 ? part.slice(0, firstLineEnd).trim() : '';
                           const code = firstLineEnd !== -1 ? part.slice(firstLineEnd + 1) : part;
@@ -682,7 +892,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       )}
 
-      {/* 5. SMART MESSAGE INPUT BOX (Fixed Bottom matching screenshot) */}
+      {/* 5. SMART MESSAGE INPUT BOX */}
       <div className="p-3 bg-[#171717] border-t border-[#2a2a2a]">
         <div className="bg-[#202020] border border-[#303030] focus-within:border-neutral-500 rounded-xl p-2.5 transition-colors shadow-inner flex flex-col justify-between">
           <textarea
@@ -696,11 +906,15 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 handleSend();
               }
             }}
-            placeholder="Ask anything, @ to mention, / for actions..."
+            placeholder={
+              executionMode === 'autonomous'
+                ? 'Autonomous chain active. Enter requirement to run all 7 agents...'
+                : 'Ask anything, @ to mention, / for actions...'
+            }
             className="w-full bg-transparent text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none resize-none min-h-[44px]"
           />
 
-          {/* Bottom Toolbar within Input Container */}
+          {/* Bottom Toolbar */}
           <div className="flex items-center justify-between pt-2 border-t border-[#292929] text-xs">
             <div className="flex items-center gap-1.5">
               {/* Attachment Button (+) */}
@@ -747,7 +961,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 )}
               </div>
 
-              {/* Model Selector Pill (e.g. Gemini 3.8 Flash Low) */}
+              {/* Model Selector Pill */}
               <div className="relative">
                 <button
                   type="button"
@@ -819,7 +1033,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       </div>
 
-      {/* Agent Selector Dropdown (Conditional) */}
+      {/* Agent Selector Dropdown */}
       {showAgentPicker && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-[#1c1c1c] border border-[#303030] rounded-xl max-w-md w-full p-4 space-y-3 shadow-2xl">
@@ -847,7 +1061,9 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                   }`}
                 >
                   <div className="font-semibold text-xs flex items-center justify-between">
-                    <span>{r.name}</span>
+                    <span className="flex items-center gap-1.5">
+                      <span>{r.icon}</span> {r.name}
+                    </span>
                     {selectedRole === r.id && <Check className="w-3.5 h-3.5 text-cyan-400" />}
                   </div>
                   <p className="text-[11px] text-neutral-500 mt-0.5">{r.desc}</p>

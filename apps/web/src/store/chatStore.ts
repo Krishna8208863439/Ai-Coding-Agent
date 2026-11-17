@@ -1,22 +1,34 @@
 import { create } from 'zustand';
 
+export interface ToolCallItem {
+  id?: string;
+  name: string;
+  status: 'running' | 'success' | 'failed' | 'requires_approval';
+  thought?: string;
+  input?: Record<string, unknown>;
+  output?: string;
+  timestamp?: string;
+}
+
+export interface ApprovalItem {
+  id: string;
+  action: string;
+  target: string;
+  risk: 'low' | 'medium' | 'high';
+  tool?: string;
+  details?: Record<string, unknown>;
+  status?: 'pending' | 'approved' | 'rejected';
+}
+
 export interface ChatMessage {
   id?: string;
   role: 'user' | 'assistant' | 'system';
   content: string;
   tokensUsed?: number;
   timestamp?: string;
-  toolCalls?: Array<{
-    name: string;
-    status: 'running' | 'success' | 'failed';
-    output?: string;
-  }>;
-  approvalRequired?: {
-    id: string;
-    action: string;
-    target: string;
-    risk: 'low' | 'medium' | 'high';
-  };
+  agentRole?: string;
+  toolCalls?: ToolCallItem[];
+  approvalRequired?: ApprovalItem;
 }
 
 export interface ConversationSummary {
@@ -35,6 +47,24 @@ export interface ModelOption {
   badge?: string;
 }
 
+export interface AgentActivityEvent {
+  type: 'run_start' | 'agent_switch' | 'tool_start' | 'tool_complete' | 'approval' | 'agent_complete' | 'run_complete' | 'error';
+  runId?: string;
+  agent?: string;
+  agentName?: string;
+  tool?: string;
+  input?: Record<string, unknown>;
+  thought?: string;
+  output?: string;
+  status?: string;
+  approvalId?: string;
+  actionType?: string;
+  details?: Record<string, unknown>;
+  stepCount?: number;
+  timestamp?: string;
+  message?: string;
+}
+
 interface ChatState {
   conversations: ConversationSummary[];
   currentConversationId: string | null;
@@ -43,6 +73,9 @@ interface ChatState {
   selectedModel: string;
   selectedProvider: string;
   selectedRole: string;
+  executionMode: 'single' | 'autonomous';
+  activeAgentRunId: string | null;
+  recentActivities: AgentActivityEvent[];
   abortController: AbortController | null;
   attachments: string[];
   searchQuery: string;
@@ -57,6 +90,10 @@ interface ChatState {
   setSelectedModel: (m: string) => void;
   setSelectedProvider: (p: string) => void;
   setSelectedRole: (r: string) => void;
+  setExecutionMode: (mode: 'single' | 'autonomous') => void;
+  setActiveAgentRunId: (id: string | null) => void;
+  addActivityEvent: (ev: AgentActivityEvent) => void;
+  clearActivities: () => void;
   setAbortController: (c: AbortController | null) => void;
   addAttachment: (att: string) => void;
   removeAttachment: (att: string) => void;
@@ -74,6 +111,9 @@ export const useChatStore = create<ChatState>((set) => ({
   selectedModel: 'gemini-2.0-flash',
   selectedProvider: 'gemini',
   selectedRole: 'ARCHITECT',
+  executionMode: 'single',
+  activeAgentRunId: null,
+  recentActivities: [],
   abortController: null,
   attachments: [],
   searchQuery: '',
@@ -101,6 +141,13 @@ export const useChatStore = create<ChatState>((set) => ({
   setSelectedModel: (selectedModel) => set({ selectedModel }),
   setSelectedProvider: (selectedProvider) => set({ selectedProvider }),
   setSelectedRole: (selectedRole) => set({ selectedRole }),
+  setExecutionMode: (executionMode) => set({ executionMode }),
+  setActiveAgentRunId: (activeAgentRunId) => set({ activeAgentRunId }),
+  addActivityEvent: (ev) =>
+    set((s) => ({
+      recentActivities: [ev, ...s.recentActivities.slice(0, 49)],
+    })),
+  clearActivities: () => set({ recentActivities: [] }),
   setAbortController: (abortController) => set({ abortController }),
   addAttachment: (att) =>
     set((s) => ({
@@ -119,5 +166,7 @@ export const useChatStore = create<ChatState>((set) => ({
       messages: [],
       isStreaming: false,
       attachments: [],
+      activeAgentRunId: null,
+      recentActivities: [],
     }),
 }));
