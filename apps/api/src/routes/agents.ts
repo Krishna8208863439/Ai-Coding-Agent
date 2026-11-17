@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth';
 import { AGENT_ROLES_CATALOG, AgentToolRegistry } from '@nexora/agents';
 import { WorkspaceManager } from '../lib/workspaceManager';
+import { ApiExecutionEngine } from '../lib/apiExecutionEngine';
 import { Prisma } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -35,6 +36,7 @@ async function executeTool(
   tool: string,
   input: Record<string, unknown>,
   projectId: string,
+  userId?: string,
 ): Promise<{ output: string; requiresApproval: boolean; approvalType?: string; approvalDetails?: Record<string, unknown> }> {
   const approval = AgentToolRegistry.requiresHumanApproval(tool, input);
 
@@ -48,6 +50,98 @@ async function executeTool(
   }
 
   try {
+    // Universal API Tools
+    if (tool === 'list_connected_apis') {
+      if (!userId) return { output: '[]', requiresApproval: false };
+      const apis = await prisma.apiConfiguration.findMany({
+        where: { userId },
+        include: { endpoints: true },
+      });
+      const summary = apis.map((a) => ({
+        id: a.id,
+        name: a.name,
+        baseUrl: a.baseUrl,
+        status: a.status,
+        category: a.category,
+        endpointCount: a.endpoints.length,
+      }));
+      return { output: JSON.stringify(summary, null, 2), requiresApproval: false };
+    }
+
+    if (tool === 'get_api_details') {
+      const apiId = input.apiId as string;
+      const api = await prisma.apiConfiguration.findFirst({
+        where: { id: apiId, ...(userId ? { userId } : {}) },
+        include: { endpoints: true, credential: true },
+      });
+      if (!api) return { output: `API with ID ${apiId} not found.`, requiresApproval: false };
+      return {
+        output: JSON.stringify(
+          {
+            id: api.id,
+            name: api.name,
+            baseUrl: api.baseUrl,
+            category: api.category,
+            status: api.status,
+            authType: api.credential?.authType,
+            endpoints: api.endpoints.map((e) => ({ name: e.name, path: e.path, method: e.method })),
+          },
+          null,
+          2
+        ),
+        requiresApproval: false,
+      };
+    }
+
+    if (tool === 'call_connected_api') {
+      const apiId = input.apiId as string;
+      const path = (input.path as string) || '/';
+      const method = ((input.method as string) || 'GET').toUpperCase() as any;
+
+      const api = await prisma.apiConfiguration.findFirst({
+        where: { id: apiId, ...(userId ? { userId } : {}) },
+        include: { credential: true },
+      });
+
+      if (!api) return { output: `API with ID ${apiId} not found.`, requiresApproval: false };
+
+      const execResult = await ApiExecutionEngine.execute({
+        baseUrl: api.baseUrl,
+        endpointPath: path,
+        method,
+        credential: api.credential
+          ? {
+              authType: api.credential.authType as any,
+              encryptedSecret: api.credential.encryptedSecret,
+              iv: api.credential.iv,
+              authTag: api.credential.authTag,
+              headerName: api.credential.headerName,
+              queryParamKey: api.credential.queryParamKey,
+              prefix: api.credential.prefix,
+              customHeaders: api.credential.customHeaders as Record<string, string>,
+            }
+          : null,
+        body: input.body,
+        customHeaders: input.headers as Record<string, string>,
+        queryParams: input.queryParams as Record<string, string>,
+      });
+
+      return {
+        output: JSON.stringify(
+          {
+            success: execResult.success,
+            statusCode: execResult.statusCode,
+            data: execResult.data,
+            durationMs: execResult.durationMs,
+          },
+          null,
+          2
+        ),
+        requiresApproval: false,
+      };
+    }
+
+    // Standard Tools
     if (tool === 'list_files') {
       const tree = await WorkspaceManager.listFiles(projectId);
       return { output: JSON.stringify(tree, null, 2), requiresApproval: false };
@@ -371,7 +465,7 @@ agentsRouter.post('/runs', requireAuth, async (req: AuthenticatedRequest, res: R
           timestamp: new Date().toISOString(),
         });
 
-        const result = await executeTool(tool, toolInput, projectId);
+        const result = await executeTool(tool, toolInput, projectId, req.user!.sub);
         const thought =
           thoughtMap[currentAgent]?.[tool] ||
           `${agentDef.name} executing "${tool}" for: "${prompt.slice(0, 60)}"`;

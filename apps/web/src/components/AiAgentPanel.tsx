@@ -69,6 +69,7 @@ const MENTION_OPTIONS = [
   { tag: '@file', desc: 'Reference current editor file or choose a path' },
   { tag: '@terminal', desc: 'Inspect recent terminal output and execution logs' },
   { tag: '@problems', desc: 'Include active syntax and typechecker diagnostics' },
+  { tag: '@apis', desc: 'Include configured Universal APIs and available endpoints' },
   { tag: '@agent', desc: 'Delegate sub-tasks to a specialized engineering agent' },
 ];
 
@@ -78,6 +79,8 @@ const SLASH_COMMANDS = [
   { cmd: '/fix', desc: 'Diagnose and propose fixes for open compiler issues' },
   { cmd: '/test', desc: 'Generate test cases for current open file' },
   { cmd: '/plan', desc: 'Create detailed step-by-step implementation plan' },
+  { cmd: '/apis', desc: 'List all connected Universal APIs in chat' },
+  { cmd: '/call-api', desc: 'Execute a connected Universal API endpoint' },
   { cmd: '/autonomous', desc: 'Toggle 7-agent autonomous chain mode' },
   { cmd: '/model', desc: 'Open the model switch picker' },
   { cmd: '/agents', desc: 'Switch specialized engineering agent role' },
@@ -224,6 +227,35 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     if (cmd === '/autonomous') {
       setExecutionMode(executionMode === 'autonomous' ? 'single' : 'autonomous');
       setInputPrompt('');
+      return;
+    }
+    if (cmd === '/apis') {
+      // Fetch and list connected APIs
+      (async () => {
+        try {
+          const res = await fetch('/api/universal-apis', {
+            headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const apis = data.apis || [];
+            const listStr = apis.length
+              ? apis.map((a: any) => `- **${a.name}** (\`${a.baseUrl}\`) — Status: \`${a.status}\`, Endpoints: ${a.endpoints?.length || 0}`).join('\n')
+              : 'No external APIs configured yet. Open **Universal API Manager** to add one.';
+            addMessage({
+              role: 'system',
+              content: `🔌 **Connected Universal APIs (${apis.length}):**\n\n${listStr}`,
+            });
+          }
+        } catch {
+          addMessage({ role: 'system', content: 'Failed to retrieve connected APIs.' });
+        }
+      })();
+      setInputPrompt('');
+      return;
+    }
+    if (cmd === '/call-api') {
+      setInputPrompt('@apis /call-api [API_ID] GET /endpoint');
       return;
     }
     if (cmd === '/model') {

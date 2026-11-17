@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
 import express from 'express';
 import { agentsRouter } from '../routes/agents';
-import { AGENT_ROLES_CATALOG } from '@nexora/agents';
+import { AGENT_ROLES_CATALOG, AgentToolRegistry } from '@nexora/agents';
 
 // Mock dependencies
 vi.mock('../lib/prisma', () => {
@@ -14,10 +14,30 @@ vi.mock('../lib/prisma', () => {
       { id: 'proj-1', userId: 'user-123', name: 'Test Proj', template: 'react' },
       { id: 'proj-other', userId: 'other-user', name: 'Other Proj', template: 'react' },
     ],
+    apiConfigurations: [
+      {
+        id: 'api-1',
+        userId: 'user-123',
+        name: 'GitHub API',
+        baseUrl: 'https://api.github.com',
+        status: 'CONNECTED',
+        category: 'Developer APIs',
+        endpoints: [{ id: 'ep-1', name: 'Get User', path: '/user', method: 'GET' }],
+        credential: { authType: 'BEARER_TOKEN' },
+      },
+    ],
   };
 
   return {
     prisma: {
+      apiConfiguration: {
+        findMany: vi.fn(({ where }) => {
+          return Promise.resolve(store.apiConfigurations.filter((a) => !where?.userId || a.userId === where.userId));
+        }),
+        findFirst: vi.fn(({ where }) => {
+          return Promise.resolve(store.apiConfigurations.find((a) => a.id === where.id) || null);
+        }),
+      },
       agentRun: {
         findMany: vi.fn(({ where }) => {
           return Promise.resolve(store.agentRuns.filter((r) => r.userId === where?.userId));
@@ -91,6 +111,18 @@ vi.mock('../lib/workspaceManager', () => ({
     listFiles: vi.fn().mockResolvedValue([{ path: 'src/index.ts', isDir: false, size: 100 }]),
     readFile: vi.fn().mockResolvedValue('export const hello = "world";'),
     writeFile: vi.fn().mockResolvedValue(undefined),
+  },
+}));
+
+// Mock ApiExecutionEngine
+vi.mock('../lib/apiExecutionEngine', () => ({
+  ApiExecutionEngine: {
+    execute: vi.fn().mockResolvedValue({
+      success: true,
+      statusCode: 200,
+      data: { login: 'octocat', id: 1 },
+      durationMs: 45,
+    }),
   },
 }));
 
@@ -185,5 +217,18 @@ describe('Agents API Router', () => {
     const res = await request(app).get('/api/agents/approvals');
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body.approvals)).toBe(true);
+  });
+
+  it('Agent Tool Registry identifies Universal API tools and human approval rules', () => {
+    const readApproval = AgentToolRegistry.requiresHumanApproval('call_connected_api', { method: 'GET' });
+    expect(readApproval.requires).toBe(false);
+
+    const postApproval = AgentToolRegistry.requiresHumanApproval('call_connected_api', { method: 'POST' });
+    expect(postApproval.requires).toBe(true);
+    expect(postApproval.type).toBe('CALL_API');
+
+    const deleteApproval = AgentToolRegistry.requiresHumanApproval('call_connected_api', { method: 'DELETE' });
+    expect(deleteApproval.requires).toBe(true);
+    expect(deleteApproval.type).toBe('CALL_API');
   });
 });
