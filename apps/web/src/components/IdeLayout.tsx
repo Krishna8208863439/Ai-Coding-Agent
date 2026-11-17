@@ -3,6 +3,7 @@ import Editor from '@monaco-editor/react';
 import { TopNavbar } from './TopNavbar';
 import { ActivityBar, ActivityTab } from './ActivityBar';
 import { ExplorerSidebar } from './ExplorerSidebar';
+import { SourceControlSidebar } from './SourceControlSidebar';
 import { AiAgentPanel } from './AiAgentPanel';
 import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
@@ -158,6 +159,11 @@ export function IdeLayout({ children }: IdeLayoutProps) {
             onDeleteFile={handleDeleteFile}
             onRefresh={() => {}}
           />
+        )}
+
+        {/* Source Control & GitHub Remote Sidebar */}
+        {activeActivityTab === 'git' && (
+          <SourceControlSidebar onOpenFile={handleOpenFile} />
         )}
 
         {/* Central Editor / Viewport Area */}
