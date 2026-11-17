@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import { IdeLayout } from './components/IdeLayout';
 import { AppShell } from './components/AppShell';
 import { Dashboard } from './pages/Dashboard';
 import { ComingSoon } from './pages/ComingSoon';
@@ -17,8 +18,13 @@ import { GitHubPage } from './pages/GitHubPage';
 export default function App() {
   return (
     <Routes>
+      {/* Root Desktop IDE Experience matching Reference Layout */}
+      <Route path="/" element={<IdeLayout />} />
+      <Route path="/ide" element={<IdeLayout />} />
+
+      {/* Dedicated Full Views inside AppShell */}
       <Route element={<AppShell />}>
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/dashboard" element={<Dashboard />} />
         <Route path="/new-project" element={<NewProject />} />
         <Route path="/workspace" element={<AIWorkspace />} />
         <Route path="/agents" element={<AIAgents />} />
