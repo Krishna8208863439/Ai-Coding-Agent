@@ -9,7 +9,8 @@ export type AuditAction =
   | 'AUTH_LOGOUT'
   | 'AUTH_REFRESH'
   | 'AUTH_REFRESH_REUSE_DETECTED'
-  | 'AUTH_TOKEN_INVALID';
+  | 'AUTH_TOKEN_INVALID'
+  | 'USER_SETTINGS_UPDATE';
 
 export async function writeAuditLog(
   action: AuditAction,

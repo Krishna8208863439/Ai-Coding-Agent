@@ -26,6 +26,8 @@ model User {
   projects      Project[]
   agentRuns     AgentRun[]
   approvals     Approval[]
+  gitHubConnection GitHubConnection?
+  userSettings  UserSettings?
 
   @@index([email])
   @@map("users")
@@ -276,6 +278,38 @@ model AuditLog {
   @@index([userId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model GitHubConnection {
+  id          String   @id @default(cuid())
+  userId      String   @unique
+  username    String
+  accessToken String?  // Encrypted via AES-256-GCM
+  scope       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("github_connections")
+}
+
+model UserSettings {
+  id               String   @id @default(cuid())
+  userId           String   @unique
+  interfaceLayout  String   @default("engineering") // engineering, knowledge
+  permissionPreset String   @default("default")     // default, read_only, controlled, autonomous
+  theme            String   @default("dark")        // dark, light, system
+  editorFontSize   Int      @default(13)
+  editorFontFamily String   @default("JetBrains Mono")
+  notifyOnComplete Boolean  @default(true)
+  notifyOnApproval Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_settings")
 }
 
 enum Role {

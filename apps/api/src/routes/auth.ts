@@ -214,3 +214,59 @@ authRouter.get('/me', requireAuth, async (req: AuthenticatedRequest, res: Respon
   res.status(200).json({ user });
 });
 
+// --- GET /api/auth/settings ---
+authRouter.get('/settings', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const settings = await prisma.userSettings.findUnique({
+    where: { userId: req.user!.sub },
+  });
+
+  if (!settings) {
+    // Return sensible defaults
+    res.status(200).json({
+      settings: {
+        interfaceLayout: 'engineering',
+        permissionPreset: 'default',
+        theme: 'dark',
+        editorFontSize: 13,
+        editorFontFamily: 'JetBrains Mono',
+        notifyOnComplete: true,
+        notifyOnApproval: true,
+      },
+    });
+    return;
+  }
+
+  res.status(200).json({ settings });
+});
+
+// --- PUT /api/auth/settings ---
+const settingsUpdateSchema = z.object({
+  interfaceLayout: z.enum(['engineering', 'knowledge']).optional(),
+  permissionPreset: z.enum(['default', 'read_only', 'controlled', 'autonomous']).optional(),
+  theme: z.enum(['dark', 'light', 'system']).optional(),
+  editorFontSize: z.number().min(10).max(28).optional(),
+  editorFontFamily: z.string().optional(),
+  notifyOnComplete: z.boolean().optional(),
+  notifyOnApproval: z.boolean().optional(),
+});
+
+authRouter.put('/settings', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const parsed = settingsUpdateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: 'Invalid settings payload', details: parsed.error.flatten() });
+    return;
+  }
+
+  const updated = await prisma.userSettings.upsert({
+    where: { userId: req.user!.sub },
+    update: parsed.data,
+    create: {
+      userId: req.user!.sub,
+      ...parsed.data,
+    },
+  });
+
+  await writeAuditLog('USER_SETTINGS_UPDATE', req, req.user!.sub);
+  res.status(200).json({ settings: updated });
+});
+
