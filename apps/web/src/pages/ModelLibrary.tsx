@@ -1,164 +1,392 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, Badge, Button } from '@nexora/ui';
-import { Library, Search, Eye, Wrench, Sparkles, CheckCircle2 } from 'lucide-react';
-import { ModelInfo } from '@nexora/shared';
+import {
+  Cpu,
+  Search,
+  Eye,
+  Wrench,
+  Sparkles,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  Plus,
+  Key,
+  ShieldCheck,
+  Zap,
+  Globe,
+  Sliders,
+} from 'lucide-react';
+import { ModelInfo, LLMProviderType } from '@nexora/shared';
+import { useAuthStore } from '../store/authStore';
+import { useChatStore } from '../store/chatStore';
+
+interface ProviderConfigItem {
+  id: string;
+  provider: LLMProviderType;
+  name: string;
+  endpoint?: string;
+  maskedApiKey?: string;
+  isDefault: boolean;
+  status: 'CONNECTED' | 'ERROR' | 'UNVERIFIED';
+  lastError?: string;
+}
 
 export function ModelLibrary() {
+  const { accessToken } = useAuthStore();
+  const { setSelectedModel, setSelectedProvider } = useChatStore();
+
   const [models, setModels] = useState<ModelInfo[]>([]);
+  const [providers, setProviders] = useState<ProviderConfigItem[]>([]);
   const [search, setSearch] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState<string>('all');
+  const [selectedProviderFilter, setSelectedProviderFilter] = useState<string>('all');
   const [filterTools, setFilterTools] = useState(false);
   const [filterVision, setFilterVision] = useState(false);
-  const [defaultModelId, setDefaultModelId] = useState<string>('gemini-2.0-flash');
+  const [activeTab, setActiveTab] = useState<'models' | 'providers'>('models');
+  const [loading, setLoading] = useState(false);
+
+  // Add Provider State
+  const [newProvider, setNewProvider] = useState<LLMProviderType>('openai');
+  const [newName, setNewName] = useState('Primary');
+  const [newKey, setNewKey] = useState('');
+  const [newEndpoint, setNewEndpoint] = useState('');
+  const [testingId, setTestingId] = useState<string | null>(null);
+
+  const fetchModels = async () => {
+    try {
+      const res = await fetch(`/api/providers/models?provider=${selectedProviderFilter}`);
+      if (res.ok) {
+        const data = await res.json();
+        setModels(data.models || []);
+      }
+    } catch {}
+  };
+
+  const fetchProviders = async () => {
+    if (!accessToken) return;
+    try {
+      setLoading(true);
+      const res = await fetch('/api/providers', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setProviders(data.providers || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    fetch(`/api/providers/models?provider=${selectedProvider}`)
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (data?.models) {
-          setModels(data.models);
-        }
-      });
-  }, [selectedProvider]);
+    fetchModels();
+  }, [selectedProviderFilter]);
 
-  const filtered = models.filter((m) => {
-    const matchesSearch = m.name.toLowerCase().includes(search.toLowerCase()) || m.id.toLowerCase().includes(search.toLowerCase());
+  useEffect(() => {
+    fetchProviders();
+  }, [accessToken]);
+
+  const handleSaveProvider = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accessToken) {
+      alert('Please log in under Settings before configuring providers.');
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/providers', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({
+          provider: newProvider,
+          name: newName,
+          apiKey: newKey || undefined,
+          endpoint: newEndpoint || undefined,
+          isDefault: true,
+        }),
+      });
+
+      if (res.ok) {
+        setNewKey('');
+        setNewEndpoint('');
+        fetchProviders();
+        alert('AI Provider credentials encrypted & saved.');
+      } else {
+        const err = await res.json();
+        alert(`Error: ${err.error || 'Validation failed'}`);
+      }
+    } catch (err: any) {
+      alert(`Network error: ${err.message}`);
+    }
+  };
+
+  const handleTestProvider = async (id: string) => {
+    setTestingId(id);
+    try {
+      const res = await fetch(`/api/providers/${id}/test`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const data = await res.json();
+      alert(`Test Result: ${data.success ? 'CONNECTED' : 'FAILED'} — ${data.message || data.error}`);
+      fetchProviders();
+    } finally {
+      setTestingId(null);
+    }
+  };
+
+  const handleSelectDefaultModel = (model: ModelInfo) => {
+    setSelectedModel(model.id);
+    setSelectedProvider(model.provider);
+    alert(`Switched active agent model to: ${model.name} (${model.provider})`);
+  };
+
+  const filteredModels = models.filter((m) => {
+    const matchesSearch =
+      m.name.toLowerCase().includes(search.toLowerCase()) ||
+      m.id.toLowerCase().includes(search.toLowerCase());
     const matchesTools = !filterTools || m.supportsTools;
     const matchesVision = !filterVision || m.supportsVision;
     return matchesSearch && matchesTools && matchesVision;
   });
 
   return (
-    <div className="mx-auto max-w-6xl space-y-8">
+    <div className="flex-1 flex flex-col h-full bg-[#141414] text-neutral-200 overflow-hidden font-sans">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1f2433] pb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <Library className="h-6 w-6 text-indigo-400" />
-            AI Model Library & Capability Registry
-          </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Browse discovered models, compare token contexts, tool calling capabilities, and select platform defaults.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="info">Active Default: {defaultModelId}</Badge>
-        </div>
-      </div>
-
-      {/* Search and Filters Bar */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-neutral-400" />
-          <input
-            type="text"
-            placeholder="Search models by name or id (e.g. gpt-4o, claude, gemini)..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-lg border border-[#1f2433] bg-[#0d0f17] pl-9 pr-4 py-2 text-xs text-white placeholder-neutral-500 focus:border-indigo-500 focus:outline-none"
-          />
+      <header className="h-14 border-b border-[#252525] bg-[#1a1a1a] px-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-cyan-950/60 border border-cyan-800/40 rounded-lg text-cyan-400">
+            <Cpu className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-neutral-100 flex items-center gap-2">
+              AI Provider Manager & Model Registry
+              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-cyan-950 text-cyan-400 border border-cyan-800/50">
+                AES-256-GCM Vault
+              </span>
+            </h1>
+            <p className="text-[11px] text-neutral-400">
+              Configure LLM API keys, test streaming connections, and choose active models for autonomous agents.
+            </p>
+          </div>
         </div>
 
-        <select
-          value={selectedProvider}
-          onChange={(e) => setSelectedProvider(e.target.value)}
-          className="rounded-lg border border-[#1f2433] bg-[#0d0f17] px-3 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
-        >
-          <option value="all">All Providers</option>
-          <option value="openai">OpenAI</option>
-          <option value="gemini">Google Gemini</option>
-          <option value="anthropic">Anthropic</option>
-          <option value="groq">Groq</option>
-          <option value="mistral">Mistral</option>
-          <option value="deepseek">DeepSeek</option>
-          <option value="ollama">Ollama</option>
-        </select>
-
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 bg-[#1c1c1c] p-1 border border-[#2e2e2e] rounded-lg text-xs">
           <button
-            onClick={() => setFilterTools(!filterTools)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
-              filterTools ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300' : 'border-[#1f2433] bg-[#0d0f17] text-neutral-400 hover:text-white'
+            onClick={() => setActiveTab('models')}
+            className={`px-3 py-1 rounded font-medium transition-colors ${
+              activeTab === 'models' ? 'bg-[#2a2a2a] text-cyan-400' : 'text-neutral-400 hover:text-white'
             }`}
           >
-            <Wrench className="h-3.5 w-3.5" />
-            <span>Tool Calling</span>
+            Model Library ({models.length})
           </button>
           <button
-            onClick={() => setFilterVision(!filterVision)}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-xs transition-colors ${
-              filterVision ? 'border-indigo-500 bg-indigo-950/40 text-indigo-300' : 'border-[#1f2433] bg-[#0d0f17] text-neutral-400 hover:text-white'
+            onClick={() => setActiveTab('providers')}
+            className={`px-3 py-1 rounded font-medium transition-colors ${
+              activeTab === 'providers' ? 'bg-[#2a2a2a] text-cyan-400' : 'text-neutral-400 hover:text-white'
             }`}
           >
-            <Eye className="h-3.5 w-3.5" />
-            <span>Vision</span>
+            Connected Providers ({providers.length})
           </button>
         </div>
-      </div>
+      </header>
 
-      {/* Model Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filtered.map((m) => {
-          const isCurrentDefault = defaultModelId === m.id;
-          return (
-            <Card key={m.id} className={`transition-colors ${isCurrentDefault ? 'border-indigo-500/60 bg-indigo-950/15' : ''}`}>
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div>
-                    <CardTitle className="text-sm font-semibold">{m.name}</CardTitle>
-                    <p className="font-mono text-[11px] text-neutral-500 mt-0.5">{m.id}</p>
-                  </div>
-                  <Badge variant="outline" className="capitalize text-[10px]">
-                    {m.provider}
-                  </Badge>
-                </div>
-              </CardHeader>
+      {/* Main Content View */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {activeTab === 'providers' ? (
+          /* Provider Credentials & Vault Configuration */
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Form */}
+            <div className="lg:col-span-1 bg-[#1c1c1c] border border-[#2b2b2b] rounded-xl p-5 space-y-4">
+              <h2 className="text-xs font-semibold text-neutral-200 uppercase tracking-wider flex items-center gap-2">
+                <Key className="w-4 h-4 text-cyan-400" /> Connect AI Provider
+              </h2>
 
-              <div className="space-y-3 text-xs">
-                <div className="flex items-center justify-between text-neutral-400">
-                  <span>Context Limit:</span>
-                  <span className="font-mono text-neutral-200">{(m.contextWindow / 1000).toFixed(0)}k tokens</span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  {m.supportsTools && (
-                    <span className="inline-flex items-center gap-1 rounded bg-neutral-800/80 px-2 py-0.5 text-[10px] text-neutral-300">
-                      <Wrench className="h-2.5 w-2.5 text-indigo-400" />
-                      Tools
-                    </span>
-                  )}
-                  {m.supportsVision && (
-                    <span className="inline-flex items-center gap-1 rounded bg-neutral-800/80 px-2 py-0.5 text-[10px] text-neutral-300">
-                      <Eye className="h-2.5 w-2.5 text-emerald-400" />
-                      Vision
-                    </span>
-                  )}
+              <form onSubmit={handleSaveProvider} className="space-y-3 text-xs">
+                <div>
+                  <label className="block text-neutral-400 mb-1">Provider Type</label>
+                  <select
+                    value={newProvider}
+                    onChange={(e) => setNewProvider(e.target.value as LLMProviderType)}
+                    className="w-full bg-[#141414] border border-[#303030] rounded px-3 py-1.5 text-neutral-200 focus:outline-none focus:border-cyan-500"
+                  >
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openai">OpenAI</option>
+                    <option value="anthropic">Anthropic Claude</option>
+                    <option value="groq">Groq LPU</option>
+                    <option value="deepseek">DeepSeek</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="mistral">Mistral AI</option>
+                    <option value="ollama">Ollama (Self-Hosted)</option>
+                    <option value="custom">Custom OpenAI-Compatible</option>
+                  </select>
                 </div>
 
-                <div className="pt-2 border-t border-[#1f2433] flex items-center justify-between">
-                  {isCurrentDefault ? (
-                    <span className="flex items-center gap-1 text-[11px] text-emerald-400 font-medium">
-                      <CheckCircle2 className="h-3.5 w-3.5" />
-                      Default Model
-                    </span>
-                  ) : (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() => setDefaultModelId(m.id)}
-                      className="text-[11px] h-7 px-2.5 gap-1"
+                <div>
+                  <label className="block text-neutral-400 mb-1">Configuration Name</label>
+                  <input
+                    type="text"
+                    required
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    className="w-full bg-[#141414] border border-[#303030] rounded px-3 py-1.5 text-neutral-200 focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-400 mb-1">API Key / Secret</label>
+                  <input
+                    type="password"
+                    placeholder="Encrypted with AES-256-GCM"
+                    value={newKey}
+                    onChange={(e) => setNewKey(e.target.value)}
+                    className="w-full bg-[#141414] border border-[#303030] rounded px-3 py-1.5 text-neutral-200 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-neutral-400 mb-1">Custom Endpoint (Optional)</label>
+                  <input
+                    type="url"
+                    placeholder="https://api.openai.com/v1"
+                    value={newEndpoint}
+                    onChange={(e) => setNewEndpoint(e.target.value)}
+                    className="w-full bg-[#141414] border border-[#303030] rounded px-3 py-1.5 text-neutral-200 font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded transition-colors"
+                >
+                  Save & Encrypt Credentials
+                </button>
+              </form>
+            </div>
+
+            {/* Configured Providers List */}
+            <div className="lg:col-span-2 space-y-4">
+              <h2 className="text-xs font-semibold text-neutral-200 uppercase tracking-wider">
+                Configured Provider Connections
+              </h2>
+
+              {providers.length === 0 ? (
+                <div className="p-8 text-center border border-dashed border-[#2d2d2d] rounded-xl text-neutral-500 text-xs">
+                  No AI providers configured yet. Add your Google Gemini, OpenAI, or Groq API key to enable streaming responses.
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {providers.map((p) => (
+                    <div
+                      key={p.id}
+                      className="bg-[#1c1c1c] border border-[#2c2c2c] rounded-xl p-4 flex flex-col justify-between"
                     >
-                      <Sparkles className="h-3 w-3 text-indigo-400" />
-                      <span>Set as Default</span>
-                    </Button>
-                  )}
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="font-semibold text-neutral-100 text-xs">{p.name}</span>
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-[#252525] text-cyan-400 font-mono">
+                            {p.provider}
+                          </span>
+                        </div>
+                        <div className="space-y-1 text-[11px] text-neutral-400 font-mono mb-3">
+                          <div>Key: {p.maskedApiKey || 'None'}</div>
+                          <div>Status: {p.status}</div>
+                        </div>
+                      </div>
+
+                      <div className="pt-3 border-t border-[#262626] flex items-center justify-between">
+                        <button
+                          onClick={() => handleTestProvider(p.id)}
+                          disabled={testingId === p.id}
+                          className="px-3 py-1 bg-[#252525] hover:bg-[#303030] border border-[#383838] rounded text-[11px] text-cyan-400 font-medium"
+                        >
+                          {testingId === p.id ? 'Testing...' : 'Test Connection'}
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          /* Model Catalog */
+          <div className="space-y-4">
+            {/* Search & Filters */}
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="relative w-full sm:w-80">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-500" />
+                <input
+                  type="text"
+                  placeholder="Search models (e.g. gpt-4o, claude, gemini)..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-md pl-9 pr-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-cyan-500"
+                />
               </div>
-            </Card>
-          );
-        })}
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={selectedProviderFilter}
+                  onChange={(e) => setSelectedProviderFilter(e.target.value)}
+                  className="bg-[#1b1b1b] border border-[#2e2e2e] rounded-md px-3 py-1.5 text-xs text-neutral-300 focus:outline-none focus:border-cyan-500"
+                >
+                  <option value="all">All Providers</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai">OpenAI</option>
+                  <option value="anthropic">Anthropic Claude</option>
+                  <option value="groq">Groq</option>
+                  <option value="deepseek">DeepSeek</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Model Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {filteredModels.map((m) => (
+                <div
+                  key={m.id}
+                  className="bg-[#1c1c1c] border border-[#2c2c2c] hover:border-cyan-800/50 rounded-xl p-4 flex flex-col justify-between transition-colors"
+                >
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold text-neutral-100">{m.name}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded bg-[#282828] text-cyan-400 font-mono">
+                        {m.provider}
+                      </span>
+                    </div>
+
+                    <div className="text-[11px] text-neutral-400 space-y-1 mb-4 font-mono">
+                      <div>ID: {m.id}</div>
+                      <div>Context: {(m.contextWindow / 1000).toFixed(0)}k tokens</div>
+                      <div className="flex items-center gap-2 pt-1 text-[10px]">
+                        {m.supportsTools && (
+                          <span className="px-1.5 py-0.5 rounded bg-emerald-950/60 text-emerald-400 border border-emerald-800/40">
+                            Tool Calling
+                          </span>
+                        )}
+                        {m.supportsVision && (
+                          <span className="px-1.5 py-0.5 rounded bg-indigo-950/60 text-indigo-400 border border-indigo-800/40">
+                            Vision
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleSelectDefaultModel(m)}
+                    className="w-full py-1.5 text-xs bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-800/60 text-cyan-300 rounded font-medium transition-colors"
+                  >
+                    Select for AI Agent
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
