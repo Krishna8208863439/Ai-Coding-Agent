@@ -106,6 +106,62 @@ projectsRouter.post('/generate', requireAuth, async (req: AuthenticatedRequest, 
   });
 });
 
+// GET /api/projects/:id — Get details of a single project
+projectsRouter.get('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const project = await prisma.project.findUnique({
+    where: { id: req.params.id },
+    include: {
+      files: true,
+      tasks: { orderBy: { order: 'asc' } },
+    },
+  });
+
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  res.status(200).json({ project });
+});
+
+// DELETE /api/projects/:id — Delete a project and its workspace files
+projectsRouter.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  try {
+    // Delete files from filesystem
+    await WorkspaceManager.deleteFile(project.id, '');
+  } catch {}
+
+  await prisma.project.delete({ where: { id: req.params.id } });
+  res.status(200).json({ success: true, message: `Project ${project.name} deleted successfully.` });
+});
+
+// PATCH /api/projects/:id — Rename or update project metadata
+projectsRouter.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { name, description } = req.body as { name?: string; description?: string };
+
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  const updated = await prisma.project.update({
+    where: { id: req.params.id },
+    data: {
+      name: name || project.name,
+      description: description !== undefined ? description : project.description,
+    },
+  });
+
+  res.status(200).json({ project: updated });
+});
+
 // GET /api/projects/:id/files — List files in project directory
 projectsRouter.get('/:id/files', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const project = await prisma.project.findUnique({

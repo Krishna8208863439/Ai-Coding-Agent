@@ -1,7 +1,23 @@
 import React, { useState, useEffect } from 'react';
-import { Card, CardHeader, CardTitle, CardDescription, Badge, Button } from '@nexora/ui';
+import { useNavigate } from 'react-router-dom';
+import {
+  FolderTree,
+  FileCode,
+  Folder,
+  CheckCircle,
+  RefreshCw,
+  Plus,
+  Trash2,
+  ExternalLink,
+  Search,
+  Code2,
+  Layers,
+  Sparkles,
+  ArrowRight,
+  Clock,
+} from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { FolderTree, FileCode, Folder, CheckCircle, RefreshCw, Layers } from 'lucide-react';
+import { useIdeStore } from '../store/ideStore';
 
 interface ProjectSummary {
   id: string;
@@ -9,22 +25,19 @@ interface ProjectSummary {
   description?: string;
   template: string;
   status: string;
-}
-
-interface ProjectFileItem {
-  path: string;
-  isDir: boolean;
-  size: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export function ProjectExplorer() {
+  const navigate = useNavigate();
   const { accessToken } = useAuthStore();
+  const { setCurrentProjectId } = useIdeStore();
+
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
-  const [files, setFiles] = useState<ProjectFileItem[]>([]);
-  const [selectedFilePath, setSelectedFilePath] = useState<string | null>(null);
-  const [fileContent, setFileContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const fetchProjects = async () => {
     if (!accessToken) return;
@@ -36,49 +49,9 @@ export function ProjectExplorer() {
       if (res.ok) {
         const data = await res.json();
         setProjects(data.projects || []);
-        if (data.projects?.length > 0 && !selectedProjectId) {
-          setSelectedProjectId(data.projects[0].id);
-        }
       }
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchFiles = async (projId: string) => {
-    if (!accessToken) return;
-    try {
-      const res = await fetch(`/api/projects/${projId}/files`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFiles(data.files || []);
-        if (data.files?.length > 0) {
-          const firstFile = data.files.find((f: ProjectFileItem) => !f.isDir);
-          if (firstFile) {
-            loadFileContent(projId, firstFile.path);
-          }
-        }
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  const loadFileContent = async (projId: string, path: string) => {
-    if (!accessToken) return;
-    try {
-      setSelectedFilePath(path);
-      const res = await fetch(`/api/projects/${projId}/files/content?path=${encodeURIComponent(path)}`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFileContent(data.content);
-      }
-    } catch {
-      // ignore
     }
   };
 
@@ -86,105 +59,165 @@ export function ProjectExplorer() {
     fetchProjects();
   }, [accessToken]);
 
-  useEffect(() => {
-    if (selectedProjectId) {
-      fetchFiles(selectedProjectId);
+  const handleOpenProject = (projectId: string) => {
+    setCurrentProjectId(projectId);
+    navigate('/');
+  };
+
+  const handleDeleteProject = async (projectId: string, name: string) => {
+    if (!confirm(`Are you sure you want to delete project "${name}"? This removes all project files.`)) {
+      return;
     }
-  }, [selectedProjectId]);
+    setDeletingId(projectId);
+    try {
+      const res = await fetch(`/api/projects/${projectId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        setProjects((prev) => prev.filter((p) => p.id !== projectId));
+      }
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  const filteredProjects = projects.filter(
+    (p) =>
+      p.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      p.template.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (p.description && p.description.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-[#1f2433] pb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
-            <FolderTree className="h-6 w-6 text-indigo-400" />
-            Project File Explorer & Solution Tree
-          </h1>
-          <p className="text-xs text-neutral-400 mt-1">
-            Inspect generated source files, manifests, schemas, and README documents in isolated workspaces.
-          </p>
+    <div className="flex-1 flex flex-col h-full bg-[#141414] text-neutral-200 overflow-hidden font-sans">
+      {/* Top Header */}
+      <header className="h-14 border-b border-[#252525] bg-[#1a1a1a] px-6 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-blue-950/60 border border-blue-800/40 rounded-lg text-cyan-400">
+            <FolderTree className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-sm font-semibold text-neutral-100 flex items-center gap-2">
+              Project Management & Workspaces
+              <span className="text-[11px] font-normal px-2 py-0.5 rounded-full bg-blue-950 text-cyan-400 border border-blue-800/50">
+                PostgreSQL Managed
+              </span>
+            </h1>
+            <p className="text-[11px] text-neutral-400">
+              Select, manage, and open your generated autonomous projects in the IDE.
+            </p>
+          </div>
         </div>
-        <Button variant="ghost" size="sm" onClick={fetchProjects} className="gap-1.5 text-xs">
-          <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
-          <span>Refresh Workspaces</span>
-        </Button>
-      </div>
 
-      {projects.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-[#1f2433] p-12 text-center text-xs text-neutral-400">
-          <Layers className="mx-auto h-8 w-8 text-neutral-600 mb-2" />
-          <p>No projects generated yet.</p>
-          <p className="text-neutral-500 mt-1">Use the "New Project" generator to build your first full-stack application.</p>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => navigate('/new-project')}
+            className="px-3.5 py-1.5 text-xs bg-cyan-600 hover:bg-cyan-500 text-white font-medium rounded-md flex items-center gap-1.5 shadow-sm transition-colors"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            + New Project
+          </button>
         </div>
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Projects Column */}
-          <div className="lg:col-span-1 space-y-2">
-            <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider px-1">Projects</h3>
-            {projects.map((p) => (
-              <button
+      </header>
+
+      {/* Main Content Area */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        {/* Search & Actions Bar */}
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+          <div className="relative w-full sm:w-80">
+            <Search className="w-3.5 h-3.5 absolute left-3 top-2.5 text-neutral-500" />
+            <input
+              type="text"
+              placeholder="Search workspaces by name or stack..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-[#1b1b1b] border border-[#2e2e2e] rounded-md pl-9 pr-3 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-cyan-500"
+            />
+          </div>
+
+          <button
+            onClick={fetchProjects}
+            title="Refresh projects"
+            className="p-1.5 bg-[#1e1e1e] border border-[#2e2e2e] hover:bg-[#282828] text-neutral-400 rounded-md transition-colors"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+
+        {/* Project Card Grid */}
+        {filteredProjects.length === 0 ? (
+          <div className="p-12 text-center border border-dashed border-[#2b2b2b] rounded-lg">
+            <Folder className="w-8 h-8 text-neutral-600 mx-auto mb-3" />
+            <h3 className="text-sm font-semibold text-neutral-300 mb-1">No Workspaces Found</h3>
+            <p className="text-xs text-neutral-500 max-w-sm mx-auto mb-4">
+              Generate a full-stack React, Python Flask, or Node.js application with autonomous agents to begin coding.
+            </p>
+            <button
+              onClick={() => navigate('/new-project')}
+              className="px-4 py-2 text-xs bg-cyan-600 hover:bg-cyan-500 text-white rounded-md font-medium"
+            >
+              + Create First Project
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {filteredProjects.map((p) => (
+              <div
                 key={p.id}
-                onClick={() => setSelectedProjectId(p.id)}
-                className={`w-full rounded-lg border p-3 text-left transition-colors ${
-                  selectedProjectId === p.id
-                    ? 'border-indigo-500 bg-indigo-950/20 text-white'
-                    : 'border-[#1f2433] bg-[#0d0f17] text-neutral-300 hover:border-neutral-700'
-                }`}
+                className="bg-[#1c1c1c] border border-[#2c2c2c] hover:border-[#383838] rounded-lg p-4 flex flex-col justify-between transition-colors group"
               >
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold text-xs truncate">{p.name}</span>
-                  <Badge variant="outline" className="text-[10px] uppercase">{p.template}</Badge>
+                <div>
+                  <div className="flex items-start justify-between mb-2">
+                    <span className="text-sm font-semibold text-neutral-100 block">
+                      {p.name}
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-[#272727] text-cyan-400 font-mono border border-[#333]">
+                      {p.template}
+                    </span>
+                  </div>
+
+                  {p.description && (
+                    <p className="text-xs text-neutral-400 line-clamp-2 mb-3">
+                      {p.description}
+                    </p>
+                  )}
+
+                  <div className="space-y-1 text-[11px] text-neutral-500 font-mono mb-4">
+                    <div className="flex items-center justify-between">
+                      <span>Status:</span>
+                      <span className="text-emerald-400 font-medium">{p.status}</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span>Last Updated:</span>
+                      <span>{new Date(p.updatedAt).toLocaleDateString()}</span>
+                    </div>
+                  </div>
                 </div>
-                <p className="text-[11px] text-neutral-400 truncate mt-1">{p.description}</p>
-              </button>
+
+                <div className="pt-3 border-t border-[#252525] flex items-center justify-between">
+                  <button
+                    onClick={() => handleOpenProject(p.id)}
+                    className="px-3 py-1.5 text-xs bg-cyan-950/70 hover:bg-cyan-900 border border-cyan-800/60 text-cyan-300 rounded font-medium flex items-center gap-1.5 transition-colors"
+                  >
+                    <Code2 className="w-3.5 h-3.5" />
+                    Open in IDE
+                  </button>
+
+                  <button
+                    onClick={() => handleDeleteProject(p.id, p.name)}
+                    disabled={deletingId === p.id}
+                    title="Delete project"
+                    className="p-1 hover:bg-red-950/50 hover:text-red-400 text-neutral-500 rounded transition-colors"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
             ))}
           </div>
-
-          {/* File Tree Column */}
-          <div className="lg:col-span-1 rounded-xl border border-[#1f2433] bg-[#0d0f17] p-3 space-y-1">
-            <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2">Files</h3>
-            {files.map((f) => (
-              <button
-                key={f.path}
-                onClick={() => !f.isDir && selectedProjectId && loadFileContent(selectedProjectId, f.path)}
-                className={`flex w-full items-center gap-2 rounded px-2.5 py-1.5 text-xs text-left transition-colors ${
-                  selectedFilePath === f.path
-                    ? 'bg-indigo-600/20 text-indigo-300 font-medium'
-                    : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-white'
-                }`}
-              >
-                {f.isDir ? (
-                  <Folder className="h-3.5 w-3.5 text-indigo-400 shrink-0" />
-                ) : (
-                  <FileCode className="h-3.5 w-3.5 text-neutral-400 shrink-0" />
-                )}
-                <span className="truncate">{f.path}</span>
-              </button>
-            ))}
-          </div>
-
-          {/* File Preview Column */}
-          <div className="lg:col-span-2 rounded-xl border border-[#1f2433] bg-[#0d0f17] flex flex-col overflow-hidden">
-            <div className="border-b border-[#1f2433] px-4 py-2.5 flex items-center justify-between bg-[#131620]">
-              <span className="font-mono text-xs text-neutral-300">{selectedFilePath || 'Select a file'}</span>
-              <Badge variant="success">Workspace File</Badge>
-            </div>
-            <div className="flex-1 p-4 overflow-auto bg-[#090a0f]">
-              {fileContent ? (
-                <pre className="font-mono text-xs text-neutral-200 leading-relaxed whitespace-pre">
-                  <code>{fileContent}</code>
-                </pre>
-              ) : (
-                <div className="flex h-full items-center justify-center text-xs text-neutral-500">
-                  Select a file from the tree to preview contents.
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
-
