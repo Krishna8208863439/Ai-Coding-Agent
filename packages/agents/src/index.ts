@@ -70,12 +70,23 @@ export interface ToolExecutionResult {
   tool: string;
   output: string;
   requiresApproval?: boolean;
-  approvalType?: 'FILE_DELETE' | 'INSTALL_DEPS' | 'EXECUTE_CMD';
+  approvalType?: 'FILE_DELETE' | 'INSTALL_DEPS' | 'EXECUTE_CMD' | 'CALL_API';
   approvalDetails?: Record<string, unknown>;
 }
 
+export const UNIVERSAL_API_TOOLS = [
+  'list_connected_apis',
+  'get_api_details',
+  'get_api_schema',
+  'test_api',
+  'call_connected_api',
+  'inspect_api_response',
+  'create_api_configuration',
+  'update_api_configuration',
+];
+
 export class AgentToolRegistry {
-  static requiresHumanApproval(tool: string, input: Record<string, unknown>): { requires: boolean; type?: 'FILE_DELETE' | 'INSTALL_DEPS' | 'EXECUTE_CMD' } {
+  static requiresHumanApproval(tool: string, input: Record<string, unknown>): { requires: boolean; type?: 'FILE_DELETE' | 'INSTALL_DEPS' | 'EXECUTE_CMD' | 'CALL_API' } {
     if (tool === 'delete_file') {
       return { requires: true, type: 'FILE_DELETE' };
     }
@@ -84,6 +95,13 @@ export class AgentToolRegistry {
     }
     if (tool === 'run_command' && !['npm test', 'vitest run', 'pytest'].includes((input.command as string) || '')) {
       return { requires: true, type: 'EXECUTE_CMD' };
+    }
+    if (tool === 'call_connected_api') {
+      const method = ((input.method as string) || 'GET').toUpperCase();
+      // Safe read operations don't mandate approval unless explicitly flagged; modifying operations require approval
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) || input.requiresApproval === true) {
+        return { requires: true, type: 'CALL_API' };
+      }
     }
     return { requires: false };
   }

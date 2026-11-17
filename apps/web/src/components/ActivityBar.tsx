@@ -9,6 +9,7 @@ import {
   FolderKanban,
   Settings,
   Terminal,
+  Network,
 } from 'lucide-react';
 
 export type ActivityTab =
@@ -20,6 +21,7 @@ export type ActivityTab =
   | 'agents'
   | 'projects'
   | 'terminal'
+  | 'universal-apis'
   | 'settings';
 
 interface ActivityBarProps {
@@ -34,9 +36,10 @@ export function ActivityBar({ activeTab, onSelectTab }: ActivityBarProps) {
     { id: 'git', label: 'Source Control & GitHub (Ctrl+Shift+G)', icon: GitBranch },
     { id: 'debug', label: 'Run & Testing (Ctrl+Shift+D)', icon: PlayCircle },
     { id: 'agents', label: 'Autonomous AI Agents', icon: Bot },
+    { id: 'universal-apis', label: 'Universal API Manager', icon: Network },
     { id: 'projects', label: 'Project Generator', icon: FolderKanban },
     { id: 'terminal', label: 'Integrated Terminal', icon: Terminal },
-    { id: 'extensions', label: 'API & Model Manager', icon: Package },
+    { id: 'extensions', label: 'AI Model Providers', icon: Package },
   ];
 
   return (

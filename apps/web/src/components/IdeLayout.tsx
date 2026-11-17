@@ -6,6 +6,7 @@ import { ExplorerSidebar } from './ExplorerSidebar';
 import { AiAgentPanel } from './AiAgentPanel';
 import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
+import { useNavigate } from 'react-router-dom';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -24,6 +25,7 @@ interface IdeLayoutProps {
 }
 
 export function IdeLayout({ children }: IdeLayoutProps) {
+  const navigate = useNavigate();
   const { accessToken } = useAuthStore();
   const {
     currentProjectId,
@@ -120,6 +122,18 @@ export function IdeLayout({ children }: IdeLayoutProps) {
         <ActivityBar
           activeTab={activeActivityTab}
           onSelectTab={(tab) => {
+            if (tab === 'universal-apis') {
+              navigate('/api-manager');
+              return;
+            }
+            if (tab === 'extensions') {
+              navigate('/models');
+              return;
+            }
+            if (tab === 'projects') {
+              navigate('/new-project');
+              return;
+            }
             if (activeActivityTab === tab) {
               setActiveActivityTab(null);
             } else {

@@ -28,6 +28,8 @@ model User {
   approvals     Approval[]
   gitHubConnection GitHubConnection?
   userSettings  UserSettings?
+  apiConfigurations ApiConfiguration[]
+  apiRequestLogs    ApiRequestLog[]
 
   @@index([email])
   @@map("users")
@@ -315,5 +317,158 @@ model UserSettings {
 enum Role {
   USER
   ADMIN
+}
+
+model ApiConfiguration {
+  id             String          @id @default(cuid())
+  userId         String
+  name           String
+  providerName   String?
+  description    String?
+  category       String          @default("Custom APIs")
+  baseUrl        String
+  environment    String          @default("DEVELOPMENT") // DEVELOPMENT, PRODUCTION
+  status         String          @default("UNVERIFIED")  // CONNECTED, ERROR, UNVERIFIED, DISABLED
+  rateLimitPerMin Int            @default(60)
+  timeoutMs      Int             @default(30000)
+  retryCount     Int             @default(0)
+  isDefault      Boolean         @default(false)
+  lastTestedAt   DateTime?
+  lastUsedAt     DateTime?
+  lastError      String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  credential     ApiCredential?
+  endpoints      ApiEndpoint[]
+  requestLogs    ApiRequestLog[]
+  usage          ApiUsage?
+  permissions    ApiPermission[]
+
+  @@unique([userId, name])
+  @@index([userId])
+  @@index([category])
+  @@index([status])
+  @@map("api_configurations")
+}
+
+model ApiCredential {
+  id              String           @id @default(cuid())
+  apiConfigId     String           @unique
+  authType        String           @default("NONE") // NONE, API_KEY, BEARER_TOKEN, BASIC_AUTH, OAUTH2, CUSTOM_HEADER, QUERY_PARAM, CUSTOM
+  encryptedSecret String?
+  iv              String?
+  authTag         String?
+  keyVersion      Int              @default(1)
+  maskedValue     String?
+  headerName      String?
+  queryParamKey   String?
+  prefix          String?          // e.g. "Bearer", "Token"
+  customHeaders   Json?            // additional static headers
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  apiConfig       ApiConfiguration @relation(fields: [apiConfigId], references: [id], onDelete: Cascade)
+
+  @@index([apiConfigId])
+  @@map("api_credentials")
+}
+
+model ApiEndpoint {
+  id                String           @id @default(cuid())
+  apiConfigId       String
+  name              String
+  path              String
+  method            String           @default("GET") // GET, POST, PUT, PATCH, DELETE, HEAD, OPTIONS
+  description       String?
+  headers           Json?
+  queryParams       Json?
+  requestBodySchema Json?
+  responseSchema    Json?
+  sampleRequest     Json?
+  sampleResponse    Json?
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  apiConfig         ApiConfiguration @relation(fields: [apiConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([apiConfigId, path, method])
+  @@index([apiConfigId])
+  @@map("api_endpoints")
+}
+
+model ApiRequestLog {
+  id           String           @id @default(cuid())
+  apiConfigId  String
+  userId       String
+  endpointPath String
+  method       String
+  statusCode   Int
+  durationMs   Int
+  success      Boolean          @default(true)
+  error        String?
+  ipAddress    String?
+  userAgent    String?
+  initiatedBy  String           @default("USER") // USER, AGENT, TEST
+  createdAt    DateTime         @default(now())
+
+  apiConfig    ApiConfiguration @relation(fields: [apiConfigId], references: [id], onDelete: Cascade)
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([apiConfigId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("api_request_logs")
+}
+
+model ApiUsage {
+  id                 String           @id @default(cuid())
+  apiConfigId        String           @unique
+  totalRequests      Int              @default(0)
+  successfulRequests Int              @default(0)
+  failedRequests     Int              @default(0)
+  avgDurationMs      Int              @default(0)
+  lastRequestAt      DateTime?
+  rateLimitHits      Int              @default(0)
+
+  apiConfig          ApiConfiguration @relation(fields: [apiConfigId], references: [id], onDelete: Cascade)
+
+  @@index([apiConfigId])
+  @@map("api_usages")
+}
+
+model ApiPermission {
+  id               String           @id @default(cuid())
+  apiConfigId      String
+  agentRole        String           // ARCHITECT, DEVELOPER, TESTER, DEBUGGER, SECURITY, UI_UX, PM, ALL
+  allowedEndpoints Json?            // string array of allowed endpoint paths or ["*"]
+  requiresApproval Boolean          @default(false)
+  readOnly         Boolean          @default(false)
+
+  apiConfig        ApiConfiguration @relation(fields: [apiConfigId], references: [id], onDelete: Cascade)
+
+  @@unique([apiConfigId, agentRole])
+  @@index([apiConfigId])
+  @@map("api_permissions")
+}
+
+model ApiTemplate {
+  id               String   @id @default(cuid())
+  name             String   @unique
+  category         String
+  description      String
+  providerName     String
+  baseUrl          String
+  defaultHeaders   Json?
+  defaultEndpoints Json?
+  authType         String   @default("API_KEY")
+  headerName       String?
+  queryParamKey    String?
+  prefix           String?
+  createdAt        DateTime @default(now())
+
+  @@index([category])
+  @@map("api_templates")
 }
 

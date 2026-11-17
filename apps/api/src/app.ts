@@ -13,6 +13,7 @@ import { agentsRouter } from './routes/agents';
 import { terminalRouter } from './routes/terminal';
 import { testingRouter } from './routes/testing';
 import { githubRouter } from './routes/github';
+import { universalApisRouter } from './routes/universalApis';
 
 export const logger = pino({
   level: process.env.LOG_LEVEL || 'info',
@@ -75,3 +76,4 @@ app.use('/api/agents', agentsRouter);
 app.use('/api/terminal', terminalRouter);
 app.use('/api/testing', testingRouter);
 app.use('/api/github', githubRouter);
+app.use('/api/universal-apis', universalApisRouter);

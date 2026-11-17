@@ -16,6 +16,7 @@ import {
   ShieldCheck,
   MessageSquare,
   Bug,
+  Network,
 } from 'lucide-react';
 import { Badge } from '@nexora/ui';
 
@@ -32,8 +33,8 @@ const NAV_ITEMS: NavItem[] = [
   { name: 'New Project', to: '/new-project', icon: FolderPlus },
   { name: 'AI Workspace', to: '/workspace', icon: Code2 },
   { name: 'AI Agents', to: '/agents', icon: Bot },
-  { name: 'API Manager', to: '/api-manager', icon: Cpu },
-  { name: 'Model Library', to: '/models', icon: Library },
+  { name: 'Universal API Manager', to: '/api-manager', icon: Network },
+  { name: 'AI Providers', to: '/models', icon: Cpu },
   { name: 'Project Explorer', to: '/explorer', icon: FolderTree },
   { name: 'Terminal', to: '/terminal', icon: Terminal },
   { name: 'Testing & Debug', to: '/testing', icon: Bug },
