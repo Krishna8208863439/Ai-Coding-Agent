@@ -294,7 +294,10 @@ export function IdeLayout({ children }: IdeLayoutProps) {
 
               {/* Retractable Bottom Panel */}
               {showBottomPanel && (
-                <BottomPanel onClose={() => setShowBottomPanel(false)} />
+                <BottomPanel
+                  onClose={() => setShowBottomPanel(false)}
+                  onOpenProblemFile={handleOpenFile}
+                />
               )}
             </>
           )}

@@ -181,3 +181,54 @@ projectsRouter.get('/:id/files/content', requireAuth, async (req: AuthenticatedR
     res.status(404).json({ error: (err as Error).message });
   }
 });
+
+// DELETE /api/projects/:id/files — Delete a file or folder
+projectsRouter.delete('/:id/files', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const filePath = req.query.path as string;
+  if (!filePath) {
+    res.status(400).json({ error: 'Missing path parameter' });
+    return;
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  try {
+    await WorkspaceManager.deleteFile(project.id, filePath);
+    await prisma.projectFile.deleteMany({
+      where: { projectId: project.id, path: filePath },
+    });
+    res.status(200).json({ success: true, path: filePath });
+  } catch (err: unknown) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});
+
+// POST /api/projects/:id/files/rename — Rename a file or folder
+projectsRouter.post('/:id/files/rename', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const { oldPath, newPath } = req.body as { oldPath: string; newPath: string };
+  if (!oldPath || !newPath) {
+    res.status(400).json({ error: 'oldPath and newPath are required' });
+    return;
+  }
+
+  const project = await prisma.project.findUnique({ where: { id: req.params.id } });
+  if (!project || project.userId !== req.user!.sub) {
+    res.status(404).json({ error: 'Project not found' });
+    return;
+  }
+
+  try {
+    await WorkspaceManager.renameFile(project.id, oldPath, newPath);
+    await prisma.projectFile.updateMany({
+      where: { projectId: project.id, path: oldPath },
+      data: { path: newPath },
+    });
+    res.status(200).json({ success: true, oldPath, newPath });
+  } catch (err: unknown) {
+    res.status(500).json({ error: (err as Error).message });
+  }
+});

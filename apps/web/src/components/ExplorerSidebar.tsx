@@ -12,9 +12,11 @@ import {
   Edit2,
   ChevronRight,
   ChevronDown,
+  X,
+  FileText,
 } from 'lucide-react';
 
-interface FileNode {
+export interface FileNode {
   path: string;
   isDir: boolean;
   size?: number;
@@ -85,86 +87,97 @@ export function ExplorerSidebar({
         </div>
       </div>
 
-      {/* Filter / Quick Search */}
-      <div className="p-2 border-b border-[#282828]">
+      {/* Filter / Search within Explorer */}
+      <div className="p-2 border-b border-[#2b2b2b] bg-[#1a1a1a]">
         <div className="relative">
           <Search className="w-3 h-3 absolute left-2 top-2 text-neutral-500" />
           <input
             type="text"
+            placeholder="Filter files by name..."
             value={filterText}
             onChange={(e) => setFilterText(e.target.value)}
-            placeholder="Filter files..."
-            className="w-full bg-[#181818] border border-[#333] rounded pl-7 pr-2 py-1 text-[11px] text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-cyan-500"
+            className="w-full bg-[#131313] border border-[#2e2e2e] rounded pl-7 pr-2 py-1 text-[11px] text-neutral-200 focus:outline-none focus:border-cyan-500"
           />
+          {filterText && (
+            <button
+              onClick={() => setFilterText('')}
+              className="absolute right-2 top-2 text-neutral-500 hover:text-neutral-300"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* File Tree */}
-      <div className="flex-1 overflow-y-auto py-1">
-        {/* New File Inline Input */}
-        {isCreatingFile && (
-          <form onSubmit={handleCreateSubmit} className="px-2 py-1 flex items-center gap-1.5 bg-[#252525]">
-            <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-            <input
-              type="text"
-              autoFocus
-              value={newFileName}
-              onChange={(e) => setNewFileName(e.target.value)}
-              onBlur={() => !newFileName && setIsCreatingFile(false)}
-              placeholder="e.g. src/index.ts"
-              className="w-full bg-[#181818] border border-cyan-500 rounded px-1.5 py-0.5 text-[11px] text-white focus:outline-none font-mono"
-            />
-          </form>
-        )}
+      {/* New File Inline Form */}
+      {isCreatingFile && (
+        <form onSubmit={handleCreateSubmit} className="p-2 bg-[#252525] border-b border-[#333]">
+          <input
+            autoFocus
+            type="text"
+            placeholder="src/filename.ts"
+            value={newFileName}
+            onChange={(e) => setNewFileName(e.target.value)}
+            className="w-full bg-[#141414] border border-cyan-500 rounded px-2 py-1 text-xs text-neutral-100 focus:outline-none"
+          />
+          <div className="flex justify-end gap-1 mt-1 text-[10px]">
+            <button
+              type="button"
+              onClick={() => setIsCreatingFile(false)}
+              className="px-2 py-0.5 text-neutral-400 hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="px-2 py-0.5 bg-cyan-600 hover:bg-cyan-500 text-white rounded font-medium"
+            >
+              Create
+            </button>
+          </div>
+        </form>
+      )}
 
+      {/* File Tree List */}
+      <div className="flex-1 overflow-y-auto p-1 space-y-0.5">
         {filteredFiles.length === 0 ? (
-          <div className="px-4 py-8 text-center text-neutral-500 text-[11px]">
-            No files found in project.
+          <div className="p-4 text-center text-neutral-500 text-xs font-sans">
+            No files found matching filter.
           </div>
         ) : (
           filteredFiles.map((file) => {
             const isActive = activeFilePath === file.path;
-            const isDir = file.isDir;
-            const depth = file.path.split('/').length - 1;
-
             return (
               <div
                 key={file.path}
-                onClick={() => (isDir ? toggleFolder(file.path) : onOpenFile(file.path))}
-                style={{ paddingLeft: `${Math.max(8, depth * 12 + 8)}px` }}
-                className={`group flex items-center justify-between pr-2 py-1 cursor-pointer transition-colors ${
+                onClick={() => onOpenFile(file.path)}
+                className={`group flex items-center justify-between px-2 py-1.5 rounded cursor-pointer transition-colors ${
                   isActive
                     ? 'bg-[#007acc]/20 text-cyan-300 font-medium'
                     : 'text-neutral-300 hover:bg-[#282828] hover:text-white'
                 }`}
               >
-                <div className="flex items-center gap-1.5 truncate">
-                  {isDir ? (
-                    expandedFolders[file.path] ? (
-                      <FolderOpen className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    ) : (
-                      <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                    )
+                <div className="flex items-center gap-2 truncate">
+                  {file.isDir ? (
+                    <Folder className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                   ) : (
                     <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
                   )}
                   <span className="truncate text-[11px] font-mono">{file.path}</span>
                 </div>
 
-                {!isDir && (
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      if (window.confirm(`Delete ${file.path}?`)) {
-                        onDeleteFile(file.path);
-                      }
+                      onDeleteFile(file.path);
                     }}
-                    title="Delete File"
-                    className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-red-400 transition-opacity"
+                    title="Delete file"
+                    className="p-1 hover:text-red-400 rounded"
                   >
                     <Trash2 className="w-3 h-3" />
                   </button>
-                )}
+                </div>
               </div>
             );
           })

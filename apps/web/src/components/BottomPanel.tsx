@@ -8,12 +8,16 @@ import {
   Maximize2,
   Trash2,
   CheckCircle2,
+  Info,
+  Bug,
 } from 'lucide-react';
+import { useIdeStore } from '../store/ideStore';
 
 interface BottomPanelProps {
   onClose?: () => void;
   terminalLogs?: string[];
   problemsCount?: number;
+  onOpenProblemFile?: (file: string) => void;
 }
 
 export function BottomPanel({
@@ -22,15 +26,16 @@ export function BottomPanel({
     'NEXORA AI Sandbox Environment Ready.',
     'Docker isolated container status: active (Node.js 20 & Python 3.12).',
     'Listening on workspace: c:\\Project\\NEXORA AI\\sandbox-workspaces',
-    'No lint or compile diagnostics reported.',
+    'TypeScript language service connected (0 compile errors).',
   ],
-  problemsCount = 0,
+  onOpenProblemFile,
 }: BottomPanelProps) {
   const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems' | 'debug'>(
     'terminal'
   );
   const [commandInput, setCommandInput] = useState('');
   const [logs, setLogs] = useState<string[]>(terminalLogs);
+  const { diagnostics } = useIdeStore();
 
   const handleCommandSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,6 +47,10 @@ export function BottomPanel({
       `[NEXORA Sandbox]: Command executed in isolated workspace.`,
     ]);
     setCommandInput('');
+  };
+
+  const clearCurrentTab = () => {
+    if (activeTab === 'terminal') setLogs([]);
   };
 
   return (
@@ -59,7 +68,6 @@ export function BottomPanel({
           >
             <Terminal className="w-3.5 h-3.5" /> Terminal
           </button>
-
           <button
             onClick={() => setActiveTab('problems')}
             className={`px-3 py-1 flex items-center gap-1.5 font-medium transition-colors ${
@@ -68,9 +76,11 @@ export function BottomPanel({
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            <AlertTriangle className="w-3.5 h-3.5" /> Problems ({problemsCount})
+            <AlertTriangle className="w-3.5 h-3.5" /> Problems
+            <span className="ml-1 px-1.5 py-0.2 bg-[#2a2a2a] rounded-full text-[10px] text-neutral-300">
+              {diagnostics.length}
+            </span>
           </button>
-
           <button
             onClick={() => setActiveTab('output')}
             className={`px-3 py-1 flex items-center gap-1.5 font-medium transition-colors ${
@@ -81,7 +91,6 @@ export function BottomPanel({
           >
             <FileText className="w-3.5 h-3.5" /> Output
           </button>
-
           <button
             onClick={() => setActiveTab('debug')}
             className={`px-3 py-1 flex items-center gap-1.5 font-medium transition-colors ${
@@ -90,66 +99,100 @@ export function BottomPanel({
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
-            <PlayCircle className="w-3.5 h-3.5" /> Debug Console
+            <Bug className="w-3.5 h-3.5" /> Debug Console
           </button>
         </div>
 
+        {/* Action icons */}
         <div className="flex items-center gap-1 text-neutral-400">
           <button
-            onClick={() => setLogs([])}
-            title="Clear Console"
-            className="p-1 hover:text-white hover:bg-[#2a2a2a] rounded transition-colors"
+            onClick={clearCurrentTab}
+            title="Clear Panel"
+            className="p-1 hover:text-white hover:bg-[#2b2b2b] rounded transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
-          <button
-            onClick={onClose}
-            title="Close Panel"
-            className="p-1 hover:text-white hover:bg-[#2a2a2a] rounded transition-colors"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              title="Close Panel"
+              className="p-1 hover:text-white hover:bg-[#2b2b2b] rounded transition-colors"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Content Area */}
-      <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] text-neutral-300 space-y-1 bg-[#141414]">
+      {/* Tab Contents */}
+      <div className="flex-1 overflow-y-auto p-3 font-mono text-[11px] bg-[#141414] text-neutral-300">
         {activeTab === 'terminal' && (
-          <div className="space-y-1">
-            {logs.map((log, idx) => (
-              <div key={idx} className="whitespace-pre-wrap leading-relaxed select-text">
-                {log}
-              </div>
-            ))}
-            <form onSubmit={handleCommandSubmit} className="flex items-center gap-2 pt-1">
+          <div className="flex flex-col h-full justify-between">
+            <div className="space-y-1 overflow-y-auto">
+              {logs.map((log, i) => (
+                <div key={i} className="text-neutral-300">
+                  {log.startsWith('$') ? (
+                    <span className="text-cyan-400 font-bold">{log}</span>
+                  ) : (
+                    log
+                  )}
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleCommandSubmit} className="mt-2 flex items-center gap-2">
               <span className="text-cyan-400 font-bold">$</span>
               <input
                 type="text"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
-                placeholder="npm test, python app.py, ls..."
-                className="flex-1 bg-transparent border-none text-white focus:outline-none font-mono text-[11px]"
+                placeholder="Type terminal command (e.g. npm test, pnpm run build)..."
+                className="w-full bg-transparent text-neutral-100 placeholder-neutral-600 focus:outline-none"
               />
             </form>
           </div>
         )}
 
         {activeTab === 'problems' && (
-          <div className="flex items-center gap-2 text-neutral-400 py-4">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>No problems have been detected in the current workspace.</span>
+          <div className="space-y-2">
+            {diagnostics.length === 0 ? (
+              <div className="text-neutral-500 py-4 text-center font-sans">
+                No problems have been detected in the workspace.
+              </div>
+            ) : (
+              diagnostics.map((diag, i) => (
+                <div
+                  key={i}
+                  onClick={() => onOpenProblemFile && onOpenProblemFile(diag.file)}
+                  className="flex items-center gap-2 p-1.5 hover:bg-[#202020] rounded cursor-pointer transition-colors"
+                >
+                  {diag.severity === 'error' ? (
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                  ) : diag.severity === 'warning' ? (
+                    <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                  ) : (
+                    <Info className="w-3.5 h-3.5 text-cyan-400" />
+                  )}
+                  <span className="text-neutral-200">{diag.message}</span>
+                  <span className="text-neutral-500 text-[10px]">
+                    {diag.file} [{diag.line}, {diag.col}]
+                  </span>
+                </div>
+              ))
+            )}
           </div>
         )}
 
         {activeTab === 'output' && (
-          <div className="text-neutral-400">
-            [Tasks Runner]: Monorepo build and lint tasks idle.
+          <div className="space-y-1 text-neutral-400">
+            <div>[NEXORA Build Output] Initialized Vite compiler service.</div>
+            <div>[NEXORA Build Output] Monaco Language Client: TypeScript / JavaScript v5.9 ready.</div>
+            <div>[NEXORA Workspace] Ready for autonomous multi-agent engineering workflows.</div>
           </div>
         )}
 
         {activeTab === 'debug' && (
-          <div className="text-neutral-400">
-            [Debug]: No active debugging sessions. Press F5 to attach debugger.
+          <div className="text-neutral-500 py-4 text-center font-sans">
+            Debug session idle. Start debugging via Run menu (F5) to attach runtime traces.
           </div>
         )}
       </div>

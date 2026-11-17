@@ -70,5 +70,17 @@ export class WorkspaceManager {
       return [];
     }
   }
+
+  static async deleteFile(projectId: string, relativePath: string): Promise<void> {
+    const fullPath = this.sanitizePath(projectId, relativePath);
+    await fs.rm(fullPath, { recursive: true, force: true });
+  }
+
+  static async renameFile(projectId: string, oldPath: string, newPath: string): Promise<void> {
+    const fullOld = this.sanitizePath(projectId, oldPath);
+    const fullNew = this.sanitizePath(projectId, newPath);
+    await fs.mkdir(path.dirname(fullNew), { recursive: true });
+    await fs.rename(fullOld, fullNew);
+  }
 }
 
