@@ -114,6 +114,10 @@ export function IdeLayout({ children }: IdeLayoutProps) {
         }
         onToggleAiPanel={() => setShowAiPanel((prev) => !prev)}
         onToggleBottomPanel={() => setShowBottomPanel((prev) => !prev)}
+        onOpenSettings={() => navigate('/settings')}
+        onNewFile={() => handleCreateFile(`src/untitled_${Date.now().toString().slice(-4)}.ts`)}
+        onSaveFile={handleSaveActive}
+        onOpenFile={handleOpenFile}
       />
 
       {/* 2. Main Middle Workspace Grid */}
@@ -238,9 +242,52 @@ export function IdeLayout({ children }: IdeLayoutProps) {
                     }}
                   />
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-neutral-500">
-                    <Code2 className="w-12 h-12 mb-3 opacity-30 text-cyan-400" />
-                    <p className="text-xs">No file open. Select a file from the explorer to edit.</p>
+                  <div className="flex flex-col items-center justify-center h-full text-neutral-400 p-8 text-center select-none">
+                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-600/30 to-blue-600/30 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4 shadow-lg">
+                      <Sparkles className="w-8 h-8" />
+                    </div>
+                    <h2 className="text-lg font-bold text-neutral-100 mb-1">NEXORA AI Workspace</h2>
+                    <p className="text-xs text-neutral-400 max-w-md mb-6">
+                      Autonomous AI Software Engineering IDE. Select a file from the explorer, open a command palette, or ask your AI Agent to build full-stack features.
+                    </p>
+                    <div className="grid grid-cols-2 gap-3 max-w-sm w-full text-left">
+                      <button
+                        onClick={() => handleCreateFile(`src/feature_${Date.now().toString().slice(-4)}.ts`)}
+                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
+                      >
+                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
+                          + New Source File
+                        </span>
+                        <span className="text-[10px] text-neutral-500">Create and edit code</span>
+                      </button>
+                      <button
+                        onClick={() => navigate('/new-project')}
+                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
+                      >
+                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
+                          📦 New Project
+                        </span>
+                        <span className="text-[10px] text-neutral-500">Prompt-to-App Generator</span>
+                      </button>
+                      <button
+                        onClick={() => navigate('/api-manager')}
+                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
+                      >
+                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
+                          🔌 Universal APIs
+                        </span>
+                        <span className="text-[10px] text-neutral-500">Connect external tokens</span>
+                      </button>
+                      <button
+                        onClick={() => setShowAiPanel(true)}
+                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
+                      >
+                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
+                          ✨ AI Autonomous Agent
+                        </span>
+                        <span className="text-[10px] text-neutral-500">Design, code & debug</span>
+                      </button>
+                    </div>
                   </div>
                 )}
               </div>
