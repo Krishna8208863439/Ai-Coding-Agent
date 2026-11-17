@@ -7,9 +7,12 @@ import { SourceControlSidebar } from './SourceControlSidebar';
 import { AiAgentPanel } from './AiAgentPanel';
 import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
+import { SettingsModal } from './SettingsModal';
+import { ToastContainer } from './ToastContainer';
 import { useNavigate } from 'react-router-dom';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
+import { usePreferencesStore } from '../store/preferencesStore';
 import {
   FileCode,
   X,
@@ -27,7 +30,7 @@ interface IdeLayoutProps {
 
 export function IdeLayout({ children }: IdeLayoutProps) {
   const navigate = useNavigate();
-  const { accessToken } = useAuthStore();
+  const { openSettings, preferences, addToast } = usePreferencesStore();
   const {
     currentProjectId,
     openTabs,
@@ -115,7 +118,7 @@ export function IdeLayout({ children }: IdeLayoutProps) {
         }
         onToggleAiPanel={() => setShowAiPanel((prev) => !prev)}
         onToggleBottomPanel={() => setShowBottomPanel((prev) => !prev)}
-        onOpenSettings={() => navigate('/settings')}
+        onOpenSettings={openSettings}
         onNewFile={() => handleCreateFile(`src/untitled_${Date.now().toString().slice(-4)}.ts`)}
         onSaveFile={handleSaveActive}
         onOpenFile={handleOpenFile}
@@ -325,6 +328,10 @@ export function IdeLayout({ children }: IdeLayoutProps) {
         activeLanguage={activeTab ? getLanguage(activeTab.path).toUpperCase() : 'TYPESCRIPT'}
         isSaving={isSaving}
       />
+
+      {/* Global Modals & Notifications */}
+      <SettingsModal />
+      <ToastContainer />
     </div>
   );
 }
