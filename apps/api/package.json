@@ -14,10 +14,14 @@
     "db:push": "prisma db push"
   },
   "dependencies": {
-    "@nexora/shared": "workspace:*",
-    "@nexora/providers": "workspace:*",
     "@nexora/agents": "workspace:*",
+    "@nexora/providers": "workspace:*",
+    "@nexora/shared": "workspace:*",
     "@prisma/client": "^6.2.1",
+    "@types/adm-zip": "^0.6.0",
+    "@types/archiver": "^8.0.0",
+    "adm-zip": "^0.6.1",
+    "archiver": "^8.0.0",
     "argon2": "^0.41.1",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

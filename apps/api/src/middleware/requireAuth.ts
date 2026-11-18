@@ -12,7 +12,22 @@ export function requireAuth(
 ): void {
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith('Bearer ')) {
-    res.status(401).json({ error: 'Missing or malformed Authorization header' });
+    // Explicit opt-in dev bypass: only if NEXORA_DEV_BYPASS_AUTH is specifically set to 'true' in non-production
+    if (process.env.NODE_ENV !== 'production' && process.env.NEXORA_DEV_BYPASS_AUTH === 'true') {
+      req.user = {
+        sub: 'usr_dev_workspace',
+        email: 'developer@nexora.local',
+        role: 'ADMIN',
+      };
+      next();
+      return;
+    }
+    res.status(401).json({
+      error: {
+        code: 'UNAUTHORIZED',
+        message: 'Missing or malformed Authorization header. Please log in or provide a valid Bearer token.',
+      },
+    });
     return;
   }
 
@@ -21,7 +36,21 @@ export function requireAuth(
     req.user = verifyAccessToken(token);
     next();
   } catch {
-    res.status(401).json({ error: 'Invalid or expired access token' });
+    // If dev bypass is explicitly active, fallback gracefully
+    if (process.env.NODE_ENV !== 'production' && process.env.NEXORA_DEV_BYPASS_AUTH === 'true') {
+      req.user = {
+        sub: 'usr_dev_workspace',
+        email: 'developer@nexora.local',
+        role: 'ADMIN',
+      };
+      next();
+      return;
+    }
+    res.status(401).json({
+      error: {
+        code: 'TOKEN_INVALID',
+        message: 'Invalid or expired access token',
+      },
+    });
   }
 }
-

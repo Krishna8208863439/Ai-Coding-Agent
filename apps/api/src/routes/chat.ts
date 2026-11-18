@@ -78,7 +78,7 @@ chatRouter.get('/conversations/:id', requireAuth, async (req: AuthenticatedReque
 chatRouter.patch('/conversations/:id', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   const parsed = renameConversationSchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(422).json({ error: 'Invalid title', issues: parsed.error.issues });
+    res.status(422).json({ error: 'Validation failed', issues: parsed.error.issues });
     return;
   }
 
@@ -210,7 +210,7 @@ chatRouter.post('/stream', requireAuth, async (req: AuthenticatedRequest, res: R
   let assistantResponse = '';
 
   try {
-    if (adapter.streamChat && apiKey) {
+    if (adapter.streamChat && apiKey && config?.status === 'CONNECTED') {
       assistantResponse = await adapter.streamChat(
         previousMessages.map((m) => ({ role: m.role, content: m.content })),
         model,
@@ -221,21 +221,19 @@ chatRouter.post('/stream', requireAuth, async (req: AuthenticatedRequest, res: R
         }
       );
     } else {
-      // Professional intelligent fallback with structured markdown and architecture
-      const rolePrefix = agentRole ? `**[${agentRole} Agent]** ` : '';
+      // Explicitly annotated simulated response when no connected provider credentials exist
+      const rolePrefix = agentRole ? `**[${agentRole} Agent - SIMULATED]** ` : '**[SIMULATED RESPONSE]** ';
       const fallbackReply =
-        `${rolePrefix}Analyzing your request: "${content}".\n\n` +
-        `### Proposed Solution\n` +
-        `I have inspected the project context and prepared the implementation:\n\n` +
+        `${rolePrefix}\n\n` +
+        `> **[SIMULATED - NO CONNECTED PROVIDER KEY]**\n` +
+        `> Provider: \`${provider}\` | Model: \`${model}\`\n\n` +
+        `Analyzing request: "${content}".\n\n` +
         `\`\`\`typescript\n` +
-        `// NEXORA AI Workspace Component\n` +
-        `export function GeneratedSolution() {\n` +
-        `  // Model: ${model} (${provider})\n` +
-        `  console.log("Ready to execute tests and apply changes.");\n` +
-        `  return { status: "ready", model: "${model}", timestamp: "${new Date().toISOString()}" };\n` +
+        `// NEXORA AI Workspace Example\n` +
+        `export function WorkspaceModule() {\n` +
+        `  console.log("Connect a real provider in AI Providers to get live model reasoning.");\n` +
         `}\n` +
-        `\`\`\`\n\n` +
-        `All unit tests and safety checks are prepared. Click **Insert into Editor** or ask me to test this module.`;
+        `\`\`\``;
 
       const words = fallbackReply.split(' ');
       for (const w of words) {
@@ -249,16 +247,24 @@ chatRouter.post('/stream', requireAuth, async (req: AuthenticatedRequest, res: R
     res.write(`data: ${JSON.stringify({ chunk: errorMsg, type: 'delta' })}\n\n`);
   }
 
-  // Persist assistant message
-  await prisma.message.create({
+  // Persist assistant message in database
+  const assistantTokens = Math.ceil(assistantResponse.length / 4);
+  const savedAssistantMsg = await prisma.message.create({
     data: {
       conversationId: conv.id,
       role: 'assistant',
       content: assistantResponse,
-      tokensUsed: Math.ceil(assistantResponse.length / 4),
+      tokensUsed: assistantTokens,
     },
   });
 
-  res.write(`data: ${JSON.stringify({ type: 'done', fullContent: assistantResponse })}\n\n`);
+  // End SSE stream
+  res.write(
+    `data: ${JSON.stringify({
+      type: 'done',
+      messageId: savedAssistantMsg.id,
+      tokensUsed: assistantTokens,
+    })}\n\n`
+  );
   res.end();
 });

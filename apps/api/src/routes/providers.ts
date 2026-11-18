@@ -4,7 +4,7 @@ import { prisma } from '../lib/prisma';
 import { encryptApiKey, decryptApiKey, maskApiKey } from '../lib/cryptoVault';
 import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth';
 import { getProviderAdapter, FALLBACK_MODELS } from '@nexora/providers';
-import { LLMProviderType } from '@nexora/shared';
+import { LLMProviderType, ModelInfo } from '@nexora/shared';
 
 export const providersRouter: Router = express.Router();
 
@@ -153,16 +153,76 @@ providersRouter.post('/:id/test', requireAuth, async (req: AuthenticatedRequest,
   res.status(200).json(result);
 });
 
-// GET /api/providers/models — Discover available models across providers
+// GET /api/providers/models — Discover models dynamically from connected providers, with simulated catalog indication
 providersRouter.get('/models', async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  const providerType = (req.query.provider as string) || 'all';
+  const providerFilter = (req.query.provider as string) || 'all';
 
-  if (providerType === 'all') {
-    const allModels = Object.values(FALLBACK_MODELS).flat();
-    res.status(200).json({ models: allModels });
+  // Check if we have an authenticated user to fetch connected providers
+  let connectedProviders: Array<{ provider: string; encryptedApiKey: string | null; iv: string | null; authTag: string | null; endpoint: string | null }> = [];
+  if (req.user?.sub) {
+    try {
+      connectedProviders = await prisma.providerConfig.findMany({
+        where: {
+          userId: req.user.sub,
+          status: 'CONNECTED',
+        },
+        select: {
+          provider: true,
+          encryptedApiKey: true,
+          iv: true,
+          authTag: true,
+          endpoint: true,
+        },
+      });
+    } catch {}
+  }
+
+  // If live connected providers exist, attempt dynamic model discovery
+  const liveModels: ModelInfo[] = [];
+  for (const cfg of connectedProviders) {
+    if (providerFilter !== 'all' && cfg.provider !== providerFilter) continue;
+
+    let key = '';
+    if (cfg.encryptedApiKey && cfg.iv && cfg.authTag) {
+      try {
+        key = decryptApiKey(cfg.encryptedApiKey, cfg.iv, cfg.authTag);
+      } catch {}
+    }
+
+    if (key) {
+      try {
+        const adapter = getProviderAdapter(cfg.provider as LLMProviderType);
+        const discovered = await adapter.listModels(key, cfg.endpoint || undefined);
+        liveModels.push(...discovered);
+      } catch {}
+    }
+  }
+
+  if (liveModels.length > 0) {
+    res.status(200).json({
+      source: 'LIVE_DISCOVERY',
+      total: liveModels.length,
+      models: liveModels,
+    });
     return;
   }
 
-  const models = FALLBACK_MODELS[providerType as LLMProviderType] || [];
-  res.status(200).json({ models });
+  // If no live connected providers, return catalog annotated as [SIMULATED]
+  const catalog =
+    providerFilter === 'all'
+      ? Object.values(FALLBACK_MODELS).flat()
+      : FALLBACK_MODELS[providerFilter as LLMProviderType] || [];
+
+  const annotated = catalog.map((m) => ({
+    ...m,
+    name: `${m.name} [SIMULATED]`,
+    isSimulated: true,
+  }));
+
+  res.status(200).json({
+    source: 'CATALOG_SIMULATED',
+    message: 'No active provider credentials configured or connected. Showing catalog definitions.',
+    total: annotated.length,
+    models: annotated,
+  });
 });
