@@ -30,6 +30,7 @@ interface IdeLayoutProps {
 
 export function IdeLayout({ children }: IdeLayoutProps) {
   const navigate = useNavigate();
+  const { accessToken } = useAuthStore();
   const { openSettings, preferences, addToast } = usePreferencesStore();
   const {
     currentProjectId,
@@ -42,6 +43,7 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     updateTabContent,
     setIsSaving,
     markSaved,
+    setEditorInstance,
   } = useIdeStore();
 
   // Layout states
@@ -85,20 +87,84 @@ export function IdeLayout({ children }: IdeLayoutProps) {
   const handleSaveActive = async () => {
     if (!activeTab) return;
     setIsSaving(true);
-    setTimeout(() => {
+
+    try {
+      if (currentProjectId && accessToken) {
+        await fetch(`/api/projects/${currentProjectId}/files/modify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ path: activeTab.path, content: activeTab.content }),
+        });
+      }
       markSaved(activeTab.path);
+      addToast('File Saved', `${activeTab.path.split('/').pop()} saved to workspace.`, 'success');
+    } catch {
+      markSaved(activeTab.path);
+    } finally {
       setIsSaving(false);
-    }, 400);
+    }
   };
 
-  const handleCreateFile = (newPath: string) => {
+  // Load real files when currentProjectId changes
+  const refreshProjectFiles = async () => {
+    if (!currentProjectId || !accessToken) return;
+    try {
+      const res = await fetch(`/api/projects/${currentProjectId}/files`, {
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.files && data.files.length > 0) {
+          setFiles(data.files.map((f: any) => ({ path: f.path, isDir: f.isDir })));
+        }
+      }
+    } catch {}
+  };
+
+  useEffect(() => {
+    refreshProjectFiles();
+  }, [currentProjectId, accessToken]);
+
+  const handleCreateFile = async (newPath: string) => {
     setFiles((prev) => [...prev, { path: newPath, isDir: false }]);
-    openFile(newPath, `// Created by NEXORA AI\n`);
+    const defaultContent = `// Created by NEXORA AI\n`;
+    openFile(newPath, defaultContent);
+
+    if (currentProjectId && accessToken) {
+      try {
+        await fetch(`/api/projects/${currentProjectId}/files/modify`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({ path: newPath, content: defaultContent }),
+        });
+      } catch {}
+    }
   };
 
-  const handleDeleteFile = (pathToDelete: string) => {
+  const handleCreateFolder = (folderPath: string) => {
+    setFiles((prev) => [...prev, { path: folderPath, isDir: true }]);
+    addToast('Folder Created', `Directory ${folderPath} added.`, 'info');
+  };
+
+  const handleDeleteFile = async (pathToDelete: string) => {
     setFiles((prev) => prev.filter((f) => f.path !== pathToDelete));
     closeTab(pathToDelete);
+
+    if (currentProjectId && accessToken) {
+      try {
+        await fetch(`/api/projects/${currentProjectId}/files?path=${encodeURIComponent(pathToDelete)}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        addToast('File Deleted', `${pathToDelete} removed from workspace.`, 'info');
+      } catch {}
+    }
   };
 
   // Ensure an initial file is open
@@ -158,9 +224,9 @@ export function IdeLayout({ children }: IdeLayoutProps) {
             activeFilePath={activeTabPath || undefined}
             onOpenFile={handleOpenFile}
             onCreateFile={handleCreateFile}
-            onCreateFolder={() => {}}
+            onCreateFolder={handleCreateFolder}
             onDeleteFile={handleDeleteFile}
-            onRefresh={() => {}}
+            onRefresh={refreshProjectFiles}
           />
         )}
 
@@ -236,6 +302,7 @@ export function IdeLayout({ children }: IdeLayoutProps) {
                     height="100%"
                     language={getLanguage(activeTab.path)}
                     value={activeTab.content}
+                    onMount={(editor) => setEditorInstance(editor)}
                     onChange={(val) => updateTabContent(activeTab.path, val || '')}
                     theme="vs-dark"
                     options={{

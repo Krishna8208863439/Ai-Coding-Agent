@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useIdeStore } from '../store/ideStore';
 import {
   Code2,
   FolderOpen,
@@ -42,6 +43,7 @@ export function TopNavbar({
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [paletteSearch, setPaletteSearch] = useState('');
+  const { triggerEditorAction } = useIdeStore();
 
   const commandItems = [
     { label: 'File: New File', action: () => onNewFile && onNewFile(), shortcut: 'Ctrl+N' },
@@ -67,18 +69,19 @@ export function TopNavbar({
       { label: 'Preferences & Settings', action: onOpenSettings, shortcut: 'Ctrl+,' },
     ],
     Edit: [
-      { label: 'Undo', shortcut: 'Ctrl+Z' },
-      { label: 'Redo', shortcut: 'Ctrl+Y' },
-      { label: 'Cut', shortcut: 'Ctrl+X' },
-      { label: 'Copy', shortcut: 'Ctrl+C' },
-      { label: 'Paste', shortcut: 'Ctrl+V' },
-      { label: 'Find in Files', shortcut: 'Ctrl+Shift+F' },
+      { label: 'Undo', action: () => triggerEditorAction('undo'), shortcut: 'Ctrl+Z' },
+      { label: 'Redo', action: () => triggerEditorAction('redo'), shortcut: 'Ctrl+Y' },
+      { label: 'Cut', action: () => triggerEditorAction('editor.action.clipboardCutAction'), shortcut: 'Ctrl+X' },
+      { label: 'Copy', action: () => triggerEditorAction('editor.action.clipboardCopyAction'), shortcut: 'Ctrl+C' },
+      { label: 'Paste', action: () => triggerEditorAction('editor.action.clipboardPasteAction'), shortcut: 'Ctrl+V' },
+      { label: 'Find in Files', action: () => triggerEditorAction('find'), shortcut: 'Ctrl+F' },
+      { label: 'Replace', action: () => triggerEditorAction('replace'), shortcut: 'Ctrl+H' },
+      { label: 'Format Document', action: () => triggerEditorAction('format'), shortcut: 'Shift+Alt+F' },
     ],
     Selection: [
-      { label: 'Select All', shortcut: 'Ctrl+A' },
-      { label: 'Expand Selection', shortcut: 'Alt+Shift+Right' },
-      { label: 'Copy Line Up', shortcut: 'Alt+Shift+Up' },
-      { label: 'Copy Line Down', shortcut: 'Alt+Shift+Down' },
+      { label: 'Select All', action: () => triggerEditorAction('selectAll'), shortcut: 'Ctrl+A' },
+      { label: 'Copy Line Up', action: () => triggerEditorAction('copyLineUp'), shortcut: 'Alt+Shift+Up' },
+      { label: 'Copy Line Down', action: () => triggerEditorAction('copyLineDown'), shortcut: 'Alt+Shift+Down' },
     ],
     View: [
       { label: 'Toggle Primary Sidebar', action: onToggleSidebar, shortcut: 'Ctrl+B' },
@@ -86,19 +89,19 @@ export function TopNavbar({
       { label: 'Toggle Terminal Panel', action: onToggleBottomPanel, shortcut: 'Ctrl+`' },
       { label: 'Open Settings', action: onOpenSettings, shortcut: 'Ctrl+,' },
     ],
+    Go: [
+      { label: 'Go to Line...', action: () => triggerEditorAction('gotoLine'), shortcut: 'Ctrl+G' },
+    ],
     Run: [
-      { label: 'Start Debugging', shortcut: 'F5' },
-      { label: 'Run Without Debugging', shortcut: 'Ctrl+F5' },
-      { label: 'Run Automated Tests', shortcut: 'Ctrl+T' },
+      { label: 'Start Application / Run', action: onToggleBottomPanel, shortcut: 'F5' },
     ],
     Terminal: [
       { label: 'Toggle Terminal Panel', action: onToggleBottomPanel, shortcut: 'Ctrl+`' },
       { label: 'New Terminal Session', action: onToggleBottomPanel, shortcut: 'Ctrl+Shift+`' },
     ],
     Help: [
-      { label: 'NEXORA Documentation', shortcut: '' },
-      { label: 'Release Notes (v1.0.0)', shortcut: '' },
-      { label: 'Architecture & ADRs', shortcut: '' },
+      { label: 'Keyboard Shortcuts Reference', action: onOpenSettings, shortcut: 'Ctrl+K Ctrl+S' },
+      { label: 'About NEXORA AI', action: onOpenSettings, shortcut: '' },
     ],
   };
 

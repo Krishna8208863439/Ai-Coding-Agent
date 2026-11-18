@@ -22,6 +22,7 @@ interface IdeState {
   diagnostics: WorkspaceDiagnostic[];
   isSaving: boolean;
   searchFilter: string;
+  editorInstance: any | null;
 
   setCurrentProjectId: (id: string | null) => void;
   openFile: (path: string, content: string) => void;
@@ -33,6 +34,10 @@ interface IdeState {
   markSaved: (path: string) => void;
   setDiagnostics: (d: WorkspaceDiagnostic[]) => void;
   setSearchFilter: (q: string) => void;
+  setEditorInstance: (editor: any) => void;
+
+  // Global Editor Actions
+  triggerEditorAction: (actionId: string) => void;
 }
 
 const STORAGE_KEY_TABS = 'nexora_open_tabs';
@@ -58,47 +63,75 @@ const restoreInitialState = () => {
 
 const initial = restoreInitialState();
 
-export const useIdeStore = create<IdeState>((set) => ({
+export const useIdeStore = create<IdeState>((set, get) => ({
   currentProjectId: initial.project,
   openTabs: initial.tabs,
   activeTabPath: initial.active,
-  diagnostics: [
-    {
-      file: 'src/index.ts',
-      line: 1,
-      col: 1,
-      message: 'Workspace initialized. TypeScript compiler service running.',
-      severity: 'info',
-    },
-  ],
+  diagnostics: [],
   isSaving: false,
   searchFilter: '',
+  editorInstance: null,
 
   setCurrentProjectId: (currentProjectId) => {
     try {
-      if (currentProjectId) localStorage.setItem(STORAGE_KEY_PROJECT, currentProjectId);
-      else localStorage.removeItem(STORAGE_KEY_PROJECT);
+      if (currentProjectId) {
+        localStorage.setItem(STORAGE_KEY_PROJECT, currentProjectId);
+      } else {
+        localStorage.removeItem(STORAGE_KEY_PROJECT);
+      }
     } catch {}
     set({ currentProjectId });
   },
 
+  setEditorInstance: (editorInstance) => set({ editorInstance }),
+
+  triggerEditorAction: (actionId: string) => {
+    const editor = get().editorInstance;
+    if (!editor) return;
+
+    try {
+      if (actionId === 'undo') {
+        editor.trigger('menu', 'undo', null);
+      } else if (actionId === 'redo') {
+        editor.trigger('menu', 'redo', null);
+      } else if (actionId === 'find') {
+        editor.trigger('menu', 'actions.find', null);
+      } else if (actionId === 'replace') {
+        editor.getAction('editor.action.startFindReplaceAction')?.run();
+      } else if (actionId === 'format') {
+        editor.getAction('editor.action.formatDocument')?.run();
+      } else if (actionId === 'selectAll') {
+        editor.setSelection(editor.getModel()?.getFullModelRange());
+      } else if (actionId === 'gotoLine') {
+        editor.getAction('editor.action.gotoLine')?.run();
+      } else if (actionId === 'copyLineUp') {
+        editor.getAction('editor.action.copyLinesUpAction')?.run();
+      } else if (actionId === 'copyLineDown') {
+        editor.getAction('editor.action.copyLinesDownAction')?.run();
+      } else {
+        editor.getAction(actionId)?.run();
+      }
+    } catch {}
+  },
+
   openFile: (path, content) =>
     set((state) => {
-      const exists = state.openTabs.some((t) => t.path === path);
-      if (exists) {
+      const existing = state.openTabs.find((t) => t.path === path);
+      if (existing) {
         try {
           localStorage.setItem(STORAGE_KEY_ACTIVE, path);
         } catch {}
         return { activeTabPath: path };
       }
+
       const name = path.split('/').pop() || path;
-      const updatedTabs = [...state.openTabs, { path, name, content, isDirty: false }];
+      const newTabs = [...state.openTabs, { path, name, content, isDirty: false }];
       try {
-        localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(updatedTabs));
+        localStorage.setItem(STORAGE_KEY_TABS, JSON.stringify(newTabs));
         localStorage.setItem(STORAGE_KEY_ACTIVE, path);
       } catch {}
       return {
-        openTabs: updatedTabs,
+        openTabs: newTabs,
         activeTabPath: path,
       };
     }),
