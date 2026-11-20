@@ -136,6 +136,15 @@ app.get('/api/phases', async (_req: Request, res: Response): Promise<void> => {
   });
 });
 
+// GET /api/models — Convenience alias for the providers model discovery endpoint
+app.get('/api/models', async (req: Request, res: Response): Promise<void> => {
+  // Forward to providers/models handler (re-use same middleware chain)
+  req.url = '/models';
+  providersRouter(req, res, () => {
+    res.status(500).json({ error: 'Internal routing error' });
+  });
+});
+
 // Routes
 app.use('/api/auth', authRouter);
 app.use('/api/providers', providersRouter);

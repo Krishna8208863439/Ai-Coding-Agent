@@ -1,5 +1,7 @@
 import express, { Router, Response } from 'express';
 import { z } from 'zod';
+import fs from 'fs/promises';
+import path from 'path';
 import { prisma } from '../lib/prisma';
 import { requireAuth, AuthenticatedRequest } from '../middleware/requireAuth';
 import { AGENT_ROLES_CATALOG, AgentToolRegistry } from '@nexora/agents';
@@ -28,6 +30,29 @@ const startRunSchema = z.object({
 
 function sseWrite(res: Response, event: Record<string, unknown>) {
   res.write(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+// ─── Resolve workspace root (local folder or sandbox project dir) ─────────
+
+async function resolveWorkspaceRoot(projectId: string): Promise<string> {
+  if (projectId === 'local') {
+    // No real project: use the first open workspace (from DB)
+    try {
+      const proj = await prisma.project.findFirst({
+        where: { kind: 'LOCAL_FOLDER' },
+        orderBy: { lastOpenedAt: 'desc' },
+      });
+      if (proj?.rootPath) return proj.rootPath;
+    } catch {}
+  } else {
+    // Try to get rootPath from DB (local folder projects have it)
+    try {
+      const proj = await prisma.project.findUnique({ where: { id: projectId } });
+      if (proj?.rootPath) return proj.rootPath;
+    } catch {}
+  }
+  // Fall back to sandbox workspace directory
+  return WorkspaceManager.getProjectDir(projectId);
 }
 
 // ─── Tool Execution (Real implementations) ──────────────────────────────────
@@ -143,18 +168,66 @@ async function executeTool(
 
     // Standard Tools
     if (tool === 'list_files') {
-      const tree = await WorkspaceManager.listFiles(projectId);
-      return { output: JSON.stringify(tree, null, 2), requiresApproval: false };
+      try {
+        const root = await resolveWorkspaceRoot(projectId);
+        const IGNORED = new Set(['.git', 'node_modules', 'dist', 'build', '.turbo', '.cache', '__pycache__']);
+        const fsSync = await import('fs');
+        const readdir = (dir: string, base: string): Array<{ path: string; isDir: boolean; size: number }> => {
+          const items: Array<{ path: string; isDir: boolean; size: number }> = [];
+          let entries: import('fs').Dirent[] = [];
+          try { entries = fsSync.readdirSync(dir, { withFileTypes: true }); } catch { return items; }
+          for (const e of entries) {
+            if (IGNORED.has(e.name)) continue;
+            const rel = (base ? base + '/' : '') + e.name;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) {
+              items.push({ path: rel, isDir: true, size: 0 });
+              items.push(...readdir(full, rel));
+            } else {
+              let size = 0;
+              try { size = fsSync.statSync(full).size; } catch {}
+              items.push({ path: rel, isDir: false, size });
+            }
+          }
+          return items;
+        };
+        const tree = readdir(root, '');
+        return { output: JSON.stringify(tree.slice(0, 200), null, 2), requiresApproval: false };
+      } catch (e: any) {
+        return { output: `list_files error: ${e.message}`, requiresApproval: false };
+      }
     }
 
     if (tool === 'read_file') {
-      const content = await WorkspaceManager.readFile(projectId, (input.path as string) || '');
-      return { output: content, requiresApproval: false };
+      try {
+        const root = await resolveWorkspaceRoot(projectId);
+        const relPath = (input.path as string) || 'README.md';
+        const full = path.resolve(root, relPath);
+        if (!full.startsWith(path.resolve(root))) {
+          return { output: 'Security: path traversal blocked.', requiresApproval: false };
+        }
+        const content = await fs.readFile(full, 'utf-8');
+        return { output: content.slice(0, 8000), requiresApproval: false };
+      } catch (e: any) {
+        return { output: `read_file error: ${e.message}`, requiresApproval: false };
+      }
     }
 
     if (tool === 'write_file') {
-      await WorkspaceManager.writeFile(projectId, (input.path as string) || '', (input.content as string) || '');
-      return { output: `File "${input.path}" written successfully.`, requiresApproval: false };
+      try {
+        const root = await resolveWorkspaceRoot(projectId);
+        const relPath = (input.path as string) || '';
+        const content = (input.content as string) || '';
+        const full = path.resolve(root, relPath);
+        if (!full.startsWith(path.resolve(root))) {
+          return { output: 'Security: path traversal blocked.', requiresApproval: false };
+        }
+        await fs.mkdir(path.dirname(full), { recursive: true });
+        await fs.writeFile(full, content, 'utf-8');
+        return { output: `File "${relPath}" written successfully (${content.length} bytes).`, requiresApproval: false };
+      } catch (e: any) {
+        return { output: `write_file error: ${e.message}`, requiresApproval: false };
+      }
     }
 
     if (tool === 'run_command') {
@@ -303,10 +376,19 @@ agentsRouter.post('/runs', requireAuth, async (req: AuthenticatedRequest, res: R
   const { projectId, prompt, agentRole, model, provider, mode } = parsed.data;
 
   // Verify project ownership
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
-  if (!project || project.userId !== req.user!.sub) {
-    res.status(404).json({ error: 'Project not found' });
-    return;
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId: req.user!.sub },
+  });
+  if (!project) {
+    // If projectId is 'local', find any trusted local workspace
+    const localProject = await prisma.project.findFirst({
+      where: { userId: req.user!.sub, kind: 'LOCAL_FOLDER' },
+      orderBy: { lastOpenedAt: 'desc' },
+    });
+    if (!localProject && projectId !== 'local') {
+      res.status(404).json({ error: 'Project not found' });
+      return;
+    }
   }
 
   // Decide which agents run

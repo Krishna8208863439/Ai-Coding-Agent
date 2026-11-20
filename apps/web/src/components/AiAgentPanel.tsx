@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Sparkles,
   Bot,
@@ -33,26 +33,19 @@ import {
   Loader2,
   Activity,
   Workflow,
+  RefreshCw,
+  WifiOff,
 } from 'lucide-react';
-import { useChatStore, ChatMessage, ToolCallItem, ApprovalItem } from '../store/chatStore';
+import { useChatStore, ChatMessage, ToolCallItem, ApprovalItem, ModelOption } from '../store/chatStore';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
+import { useWorkspaceStore } from '../store/workspaceStore';
 
 interface AiAgentPanelProps {
   onClose?: () => void;
   activeRole?: string;
   onSelectRole?: (role: string) => void;
 }
-
-const AVAILABLE_MODELS = [
-  { id: 'gemini-2.0-flash', name: 'Gemini 3.8 Flash Low', provider: 'gemini', badge: 'Fast & Smart' },
-  { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro', provider: 'gemini', badge: 'High Reasoning' },
-  { id: 'gpt-4o', name: 'GPT-4o', provider: 'openai', badge: 'Omni' },
-  { id: 'gpt-4o-mini', name: 'GPT-4o Mini', provider: 'openai', badge: 'Efficient' },
-  { id: 'claude-3-5-sonnet', name: 'Claude 3.5 Sonnet', provider: 'anthropic', badge: 'Top Coding' },
-  { id: 'llama-3.3-70b', name: 'Llama 3.3 70B', provider: 'groq', badge: 'Ultra Fast' },
-  { id: 'deepseek-chat', name: 'DeepSeek V3', provider: 'deepseek', badge: 'Open Weights' },
-];
 
 const AGENT_ROLES = [
   { id: 'ARCHITECT', name: 'Architect Agent', desc: 'System design, requirements, stack selection', icon: '📐' },
@@ -89,7 +82,8 @@ const SLASH_COMMANDS = [
 
 export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanelProps) {
   const { accessToken } = useAuthStore();
-  const { activeTabPath, openTabs, updateTabContent, currentProjectId } = useIdeStore();
+  const { activeTabPath, openTabs, updateTabContent, currentProjectId, diagnostics } = useIdeStore();
+  const { currentWorkspace, fileTree } = useWorkspaceStore();
   const {
     conversations,
     currentConversationId,
@@ -135,8 +129,63 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
   const [slashQuery, setSlashQuery] = useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState<ApprovalItem[]>([]);
 
+  // Live model list (fetched from /api/providers/models)
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // ─── Fetch live models from connected providers ──────────────────────────
+  const fetchModels = useCallback(async () => {
+    setModelsLoading(true);
+    setModelsError(null);
+    try {
+      const res = await fetch('/api/providers/models', {
+        headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const rawModels: Array<{
+        id: string;
+        name: string;
+        provider: string;
+        badge?: string;
+        isSimulated?: boolean;
+      }> = data.models || [];
+
+      const mapped: ModelOption[] = rawModels.map((m) => ({
+        id: m.id,
+        name: m.name,
+        provider: m.provider,
+        providerType: m.provider,
+        badge: m.isSimulated ? '⚠ SIMULATED' : (m.badge || m.provider.toUpperCase()),
+      }));
+
+      setAvailableModels(mapped);
+
+      // Auto-select first non-simulated model if current is not in list
+      if (mapped.length > 0) {
+        const live = mapped.filter((m) => !m.badge?.includes('SIMULATED'));
+        const target = live.length > 0 ? live[0] : mapped[0];
+        const inList = mapped.some((m) => m.id === selectedModel);
+        if (!inList) {
+          setSelectedModel(target.id);
+          setSelectedProvider(target.providerType);
+        }
+      }
+    } catch (err: any) {
+      setModelsError(err.message || 'Failed to load models');
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [accessToken, selectedModel]);
+
+  // Load models + initial data on mount
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
 
   // Sync active role with parent
   useEffect(() => {
@@ -184,7 +233,85 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, isStreaming, recentActivities]);
 
-  // Handle Input typing and @ / triggers
+  // ─── Resolve attachment content to real data ─────────────────────────────
+  const resolveAttachmentContext = async (attachmentKeys: string[]): Promise<string[]> => {
+    const resolved: string[] = [];
+    for (const key of attachmentKeys) {
+      try {
+        if (key === 'workspace-tree') {
+          const root = currentWorkspace?.rootPath;
+          if (root) {
+            const res = await fetch(
+              `/api/fs/tree?root=${encodeURIComponent(root)}&path=`,
+              { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              const lines = (data.entries || []).map((e: any) =>
+                `${e.isDir ? '📁' : '📄'} ${e.path}`
+              );
+              resolved.push(`[Workspace Tree: ${root}]\n${lines.join('\n')}`);
+              continue;
+            }
+          }
+          // Fallback: use in-memory tree
+          const lines = fileTree.slice(0, 80).map((n) => `${n.isDir ? '📁' : '📄'} ${n.path}`);
+          resolved.push(`[Workspace Tree]\n${lines.join('\n')}`);
+        } else if (key === 'terminal-logs') {
+          const res = await fetch('/api/terminal/sessions', {
+            headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const sessions = data.sessions || [];
+            const logs = sessions
+              .slice(0, 3)
+              .map((s: any) => `[Session ${s.id}] Exit:${s.exitCode ?? 'running'}\n${(s.recentOutput || []).join('\n')}`)
+              .join('\n---\n');
+            resolved.push(`[Recent Terminal Logs]\n${logs || 'No recent terminal output.'}`);
+          } else {
+            resolved.push('[Terminal Logs: unavailable]');
+          }
+        } else if (key === '@problems') {
+          const diags = diagnostics || [];
+          if (diags.length === 0) {
+            resolved.push('[Diagnostics: No active problems]');
+          } else {
+            const lines = diags.slice(0, 30).map((d: any) => `${d.severity} ${d.file}:${d.line} — ${d.message}`);
+            resolved.push(`[Active Problems (${diags.length})]\n${lines.join('\n')}`);
+          }
+        } else if (key.startsWith('@')) {
+          resolved.push(`[Mention: ${key}]`);
+        } else {
+          // Treat as a file path
+          const root = currentWorkspace?.rootPath;
+          if (root) {
+            const res = await fetch(
+              `/api/fs/read?root=${encodeURIComponent(root)}&path=${encodeURIComponent(key)}`,
+              { headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {} }
+            );
+            if (res.ok) {
+              const data = await res.json();
+              resolved.push(`[File: ${key}]\n\`\`\`\n${(data.content || '').slice(0, 4000)}\n\`\`\``);
+              continue;
+            }
+          }
+          // Try active tab content
+          const tab = openTabs.find((t) => t.path === key);
+          if (tab?.content) {
+            resolved.push(`[File: ${key}]\n\`\`\`\n${tab.content.slice(0, 4000)}\n\`\`\``);
+          } else {
+            resolved.push(`[File: ${key}]`);
+          }
+        }
+      } catch {
+        resolved.push(`[Context: ${key}]`);
+      }
+    }
+    return resolved;
+  };
+
+  // ─── Handle Input typing and @ / triggers ────────────────────────────────
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setInputPrompt(val);
@@ -211,12 +338,11 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     }
   };
 
-  // Execute Slash Command
+  // ─── Execute Slash Command ────────────────────────────────────────────────
   const applySlashCommand = (cmd: string) => {
     setSlashQuery(null);
     if (cmd === '/new') {
-      resetChat();
-      setInputPrompt('');
+      handleNewConversation();
       return;
     }
     if (cmd === '/clear') {
@@ -230,7 +356,6 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       return;
     }
     if (cmd === '/apis') {
-      // Fetch and list connected APIs
       (async () => {
         try {
           const res = await fetch('/api/universal-apis', {
@@ -268,10 +393,34 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       setInputPrompt('');
       return;
     }
+    if (cmd === '/fix') {
+      // Set role DEBUGGER and populate with diagnostics context
+      setSelectedRole('DEBUGGER');
+      if (onSelectRole) onSelectRole('DEBUGGER');
+      addAttachment('@problems');
+      setInputPrompt('Inspect the active compiler errors and diagnostics. For each issue, identify the root cause and propose the minimal correct fix with before/after code.');
+      return;
+    }
+    if (cmd === '/test') {
+      // Set role TESTER, attach active file
+      setSelectedRole('TESTER');
+      if (onSelectRole) onSelectRole('TESTER');
+      if (activeTabPath) addAttachment(activeTabPath);
+      setInputPrompt('Generate a comprehensive unit test suite for the attached file. Cover edge cases, error boundaries, and happy paths. Use the same test framework already in this project.');
+      return;
+    }
+    if (cmd === '/plan') {
+      // Set role ARCHITECT
+      setSelectedRole('ARCHITECT');
+      if (onSelectRole) onSelectRole('ARCHITECT');
+      addAttachment('workspace-tree');
+      setInputPrompt('Analyze the workspace structure and produce a detailed step-by-step implementation plan with component boundaries, data flows, API contracts, and task breakdown.');
+      return;
+    }
     if (cmd === '/help') {
       addMessage({
         role: 'system',
-        content: `**NEXORA AI Command Reference:**\n\n- \`/new\`: Start a new conversation\n- \`/clear\`: Clear chat history\n- \`/autonomous\`: Toggle 7-agent chain mode\n- \`/fix\`: Propose compiler & lint error fixes\n- \`/test\`: Generate unit test suite\n- \`/plan\`: Formulate architecture plan\n- \`/model\`: Switch LLM model\n- \`/agents\`: Switch engineering role`,
+        content: `**NEXORA AI Command Reference:**\n\n- \`/new\`: Start a new conversation\n- \`/clear\`: Clear chat history\n- \`/autonomous\`: Toggle 7-agent chain mode\n- \`/fix\`: Propose compiler & lint error fixes (sets DEBUGGER role)\n- \`/test\`: Generate unit test suite (sets TESTER role)\n- \`/plan\`: Formulate architecture plan (sets ARCHITECT role)\n- \`/model\`: Switch LLM model\n- \`/agents\`: Switch engineering role\n- \`/apis\`: List connected Universal APIs\n- \`@workspace\`: Attach file tree\n- \`@file\`: Attach current file\n- \`@terminal\`: Attach recent terminal logs\n- \`@problems\`: Attach active diagnostics`,
       });
       setInputPrompt('');
       return;
@@ -289,6 +438,8 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
       addAttachment('workspace-tree');
     } else if (tag === '@terminal') {
       addAttachment('terminal-logs');
+    } else if (tag === '@problems') {
+      addAttachment('@problems');
     } else {
       addAttachment(tag);
     }
@@ -322,11 +473,61 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     } catch {}
   };
 
-  // Send Message (Dual mode: Chat or Autonomous Multi-Agent Run)
-  const handleSend = async () => {
-    if (!inputPrompt.trim() || isStreaming) return;
+  // ─── New Conversation (creates backend record) ────────────────────────────
+  const handleNewConversation = async () => {
+    try {
+      if (accessToken) {
+        const res = await fetch('/api/chat/conversations', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({
+            title: 'New Conversation',
+            modelId: selectedModel,
+            provider: selectedProvider,
+          }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          resetChat();
+          setCurrentConversationId(data.conversation.id);
+          // Refresh conversation list
+          const listRes = await fetch('/api/chat/conversations', {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+          if (listRes.ok) {
+            const listData = await listRes.json();
+            setConversations(listData.conversations || []);
+          }
+          return;
+        }
+      }
+    } catch {}
+    // Fallback: just reset locally
+    resetChat();
+  };
 
-    const promptText = inputPrompt;
+  // ─── Welcome Tile Actions ─────────────────────────────────────────────────
+  const handleWelcomeTile = async (
+    role: string,
+    prompt: string,
+    extraAttachments?: string[]
+  ) => {
+    setSelectedRole(role);
+    if (onSelectRole) onSelectRole(role);
+    if (extraAttachments) {
+      for (const att of extraAttachments) addAttachment(att);
+    }
+    // Trigger send with this prompt directly
+    await sendMessage(prompt);
+  };
+
+  // ─── Core send logic (extracted so welcome tiles can call it) ────────────
+  const sendMessage = async (promptText: string) => {
+    if (!promptText.trim() || isStreaming) return;
+
     setInputPrompt('');
     setMentionQuery(null);
     setSlashQuery(null);
@@ -346,7 +547,22 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     const controller = new AbortController();
     setAbortController(controller);
 
-    // If autonomous chain is active, run the full 7-agent engine via /api/agents/runs
+    // Resolve attachment content to real context strings
+    let resolvedContext: string[] = [];
+    if (attachments.length > 0) {
+      try {
+        resolvedContext = await resolveAttachmentContext(attachments);
+      } catch {}
+      clearAttachments();
+    }
+
+    // Build full prompt with context
+    let fullPrompt = promptText;
+    if (resolvedContext.length > 0) {
+      fullPrompt = `${promptText}\n\n---\n**Attached Context:**\n\n${resolvedContext.join('\n\n')}`;
+    }
+
+    // If autonomous chain is active, run the full 7-agent engine
     if (executionMode === 'autonomous' && currentProjectId) {
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -365,7 +581,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
           },
           body: JSON.stringify({
             projectId: currentProjectId,
-            prompt: promptText,
+            prompt: fullPrompt,
             agentRole: selectedRole,
             mode: 'autonomous',
             model: selectedModel,
@@ -451,9 +667,8 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
           conversationId: currentConversationId || undefined,
           model: selectedModel,
           provider: selectedProvider,
-          content: promptText,
+          content: fullPrompt,
           agentRole: selectedRole,
-          attachments: attachments.length > 0 ? attachments : undefined,
         }),
         signal: controller.signal,
       });
@@ -497,6 +712,11 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     }
   };
 
+  // Send handler (called from textarea send button)
+  const handleSend = async () => {
+    await sendMessage(inputPrompt);
+  };
+
   // Stop Generation
   const handleStop = () => {
     const { abortController } = useChatStore.getState();
@@ -523,12 +743,25 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
     }
   };
 
+  // ─── Clear conversation (clears on backend if conversation exists) ─────
+  const handleClearMessages = async () => {
+    setMessages([]);
+    if (currentConversationId && accessToken) {
+      try {
+        await fetch(`/api/chat/conversations/${currentConversationId}/clear`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+      } catch {}
+    }
+  };
+
   const displayedMessages = searchQuery.trim()
     ? messages.filter((m) => m.content.toLowerCase().includes(searchQuery.toLowerCase()))
     : messages;
 
-  const currentModelName =
-    AVAILABLE_MODELS.find((m) => m.id === selectedModel)?.name || 'Gemini 3.8 Flash Low';
+  const currentModel = availableModels.find((m) => m.id === selectedModel);
+  const currentModelName = currentModel?.name || selectedModel || 'Select Model';
 
   return (
     <aside
@@ -543,16 +776,17 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
           <button
             onClick={() => setShowAgentPicker((prev) => !prev)}
             className="flex items-center gap-1.5 px-2 py-1 rounded bg-[#222] hover:bg-[#2a2a2a] border border-[#333] text-xs font-medium text-neutral-200 transition-colors"
+            title="Switch engineering agent role"
           >
             <Bot className="w-3.5 h-3.5 text-cyan-400" />
-            <span>{selectedRole}</span>
+            <span>{AGENT_ROLES.find((r) => r.id === selectedRole)?.icon} {selectedRole}</span>
             <ChevronDown className="w-3 h-3 text-neutral-400" />
           </button>
 
           {/* Autonomous Mode Toggle */}
           <button
             onClick={() => setExecutionMode(executionMode === 'autonomous' ? 'single' : 'autonomous')}
-            title={executionMode === 'autonomous' ? 'Autonomous chain active (7 agents)' : 'Single agent active'}
+            title={executionMode === 'autonomous' ? 'Autonomous chain active — click to switch to Single agent' : 'Single agent active — click to enable 7-agent autonomous chain'}
             className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border transition-colors ${
               executionMode === 'autonomous'
                 ? 'bg-cyan-950/60 border-cyan-700/70 text-cyan-300'
@@ -580,7 +814,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
           {/* Search Toggle */}
           <button
             onClick={() => setShowSearchInput((prev) => !prev)}
-            title="Search conversation"
+            title="Search conversation history"
             className={`p-1.5 rounded hover:bg-[#262626] text-neutral-400 hover:text-neutral-200 transition-colors ${
               showSearchInput ? 'bg-[#2a2a2a] text-cyan-400' : ''
             }`}
@@ -588,10 +822,10 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             <Search className="w-3.5 h-3.5" />
           </button>
 
-          {/* New Chat Button */}
+          {/* New Chat Button — creates backend record */}
           <button
-            onClick={() => resetChat()}
-            title="New Conversation"
+            onClick={handleNewConversation}
+            title="New Conversation (creates persistent thread)"
             className="p-1.5 rounded hover:bg-[#262626] text-neutral-400 hover:text-neutral-200 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
@@ -621,41 +855,35 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             </button>
 
             {showOptionsMenu && (
-              <div className="absolute right-0 top-8 w-48 bg-[#202020] border border-[#333] rounded-lg shadow-xl py-1 text-xs z-50">
+              <div className="absolute right-0 top-8 w-52 bg-[#202020] border border-[#333] rounded-lg shadow-xl py-1 text-xs z-50">
                 <button
-                  onClick={() => {
-                    resetChat();
-                    setShowOptionsMenu(false);
-                  }}
+                  onClick={() => { handleNewConversation(); setShowOptionsMenu(false); }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a2a] flex items-center gap-2"
                 >
                   <Plus className="w-3.5 h-3.5" /> New Conversation
                 </button>
                 <button
-                  onClick={() => {
-                    setMessages([]);
-                    setShowOptionsMenu(false);
-                  }}
+                  onClick={() => { handleClearMessages(); setShowOptionsMenu(false); }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a2a] text-red-400 flex items-center gap-2"
                 >
                   <Trash2 className="w-3.5 h-3.5" /> Clear Messages
                 </button>
                 <div className="border-t border-[#303030] my-1" />
                 <button
-                  onClick={() => {
-                    setShowModelPicker(true);
-                    setShowOptionsMenu(false);
-                  }}
+                  onClick={() => { setShowModelPicker(true); setShowOptionsMenu(false); }}
                   className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a2a] flex items-center gap-2"
                 >
                   <SlidersHorizontal className="w-3.5 h-3.5" /> Switch Model
                 </button>
+                <button
+                  onClick={() => { fetchModels(); setShowOptionsMenu(false); }}
+                  className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a2a] flex items-center gap-2 text-cyan-400"
+                >
+                  <RefreshCw className="w-3.5 h-3.5" /> Refresh Models
+                </button>
                 {onClose && (
                   <button
-                    onClick={() => {
-                      setShowOptionsMenu(false);
-                      onClose();
-                    }}
+                    onClick={() => { setShowOptionsMenu(false); onClose(); }}
                     className="w-full text-left px-3 py-1.5 hover:bg-[#2a2a2a] flex items-center gap-2 text-neutral-400"
                   >
                     <X className="w-3.5 h-3.5" /> Close Panel
@@ -677,13 +905,14 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
               placeholder="Search chat messages..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
+              autoFocus
               className="w-full bg-[#141414] border border-[#303030] rounded pl-8 pr-2 py-1 text-xs text-neutral-200 focus:outline-none focus:border-cyan-500"
             />
           </div>
         </div>
       )}
 
-      {/* Human Approval Required Banner (if pending) */}
+      {/* Human Approval Required Banner */}
       {pendingApprovals.length > 0 && (
         <div className="p-2.5 bg-amber-950/40 border-b border-amber-800/60 text-xs space-y-2">
           <div className="flex items-center gap-1.5 text-amber-300 font-medium">
@@ -715,7 +944,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       )}
 
-      {/* Activity Timeline Overlay / Toggle View */}
+      {/* Activity Timeline Overlay */}
       {showActivityFeed && recentActivities.length > 0 && (
         <div className="p-2 border-b border-[#2c2c2c] bg-[#161616] max-h-48 overflow-y-auto space-y-1 text-[11px]">
           <div className="flex items-center justify-between pb-1 text-[10px] font-semibold text-neutral-400 uppercase">
@@ -737,6 +966,13 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         </div>
       )}
 
+      {/* Activity Timeline empty state */}
+      {showActivityFeed && recentActivities.length === 0 && (
+        <div className="p-3 border-b border-[#2c2c2c] bg-[#161616] text-[11px] text-neutral-500 text-center">
+          No agent activity yet. Start an autonomous run to see events here.
+        </div>
+      )}
+
       {/* 2. CONVERSATION FEED (Scrollable) */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4 font-sans text-xs">
         {displayedMessages.length === 0 ? (
@@ -750,26 +986,54 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             </p>
             <div className="grid grid-cols-2 gap-2 text-left w-full max-w-sm">
               <button
-                onClick={() => setInputPrompt('/plan Formulate end-to-end fullstack architecture')}
-                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
+                onClick={() =>
+                  handleWelcomeTile(
+                    'ARCHITECT',
+                    'Analyze the workspace structure and produce a detailed step-by-step implementation plan with component boundaries, data flows, API contracts, and task breakdown.',
+                    ['workspace-tree']
+                  )
+                }
+                disabled={isStreaming}
+                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
               >
                 📐 Plan Fullstack Flow
               </button>
               <button
-                onClick={() => setInputPrompt('/fix Inspect and fix TypeScript compilation errors')}
-                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
+                onClick={() =>
+                  handleWelcomeTile(
+                    'DEBUGGER',
+                    'Inspect the active compiler errors and diagnostics. For each issue, identify the root cause and propose the minimal correct fix with before/after code.',
+                    ['@problems', activeTabPath || 'workspace-tree']
+                  )
+                }
+                disabled={isStreaming}
+                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
               >
                 🛠️ Fix Type Errors
               </button>
               <button
-                onClick={() => setInputPrompt('/test Generate unit test suite for active file')}
-                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
+                onClick={() =>
+                  handleWelcomeTile(
+                    'TESTER',
+                    'Generate a comprehensive unit test suite for the attached file. Cover edge cases, error boundaries, and happy paths. Use the same test framework already in this project.',
+                    activeTabPath ? [activeTabPath] : []
+                  )
+                }
+                disabled={isStreaming}
+                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
               >
                 🧪 Generate Unit Tests
               </button>
               <button
-                onClick={() => setInputPrompt('@workspace Run security audit and scan for leaked secrets')}
-                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors"
+                onClick={() =>
+                  handleWelcomeTile(
+                    'SECURITY',
+                    'Perform a thorough security audit of this workspace. Check for hardcoded secrets, injection vectors, insecure dependencies, authentication flaws, and OWASP Top-10 vulnerabilities.',
+                    ['workspace-tree']
+                  )
+                }
+                disabled={isStreaming}
+                className="p-2 bg-[#1f1f1f] hover:bg-[#252525] border border-[#2e2e2e] rounded text-[11px] text-neutral-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
               >
                 🛡️ Security Audit
               </button>
@@ -778,6 +1042,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
         ) : (
           displayedMessages.map((msg, idx) => {
             const isUser = msg.role === 'user';
+            const isSystem = msg.role === 'system';
             return (
               <div
                 key={idx}
@@ -786,7 +1051,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 {/* Author & Timestamp */}
                 <div className="flex items-center gap-2 mb-1 px-1 text-[10px] text-neutral-500">
                   <span className="font-semibold text-neutral-400">
-                    {isUser ? 'You' : `${msg.agentRole || selectedRole} Agent`}
+                    {isUser ? 'You' : isSystem ? '⚙ System' : `${msg.agentRole || selectedRole} Agent`}
                   </span>
                   <span>{msg.timestamp || 'Just now'}</span>
                 </div>
@@ -796,6 +1061,8 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                   className={`max-w-[95%] rounded-lg p-3 relative leading-relaxed ${
                     isUser
                       ? 'bg-[#262626] text-neutral-100 border border-[#333]'
+                      : isSystem
+                      ? 'bg-[#1a1f1a] text-neutral-300 border border-[#2a3a2a] w-full'
                       : 'bg-[#1b1b1b] text-neutral-200 border border-[#282828] w-full'
                   }`}
                 >
@@ -915,7 +1182,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
               className="px-2 py-0.5 rounded bg-[#242424] border border-[#383838] text-[10px] text-cyan-300 font-mono flex items-center gap-1"
             >
               <FileCode className="w-3 h-3 text-cyan-400" />
-              {att}
+              {att.length > 24 ? `...${att.slice(-20)}` : att}
               <button onClick={() => removeAttachment(att)} className="hover:text-red-400">
                 <X className="w-2.5 h-2.5" />
               </button>
@@ -941,7 +1208,7 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
             placeholder={
               executionMode === 'autonomous'
                 ? 'Autonomous chain active. Enter requirement to run all 7 agents...'
-                : 'Ask anything, @ to mention, / for actions...'
+                : 'Ask anything, @ to mention context, / for actions...'
             }
             className="w-full bg-transparent text-xs text-neutral-100 placeholder-neutral-500 focus:outline-none resize-none min-h-[44px]"
           />
@@ -954,22 +1221,24 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 <button
                   type="button"
                   onClick={() => setShowAttachMenu((prev) => !prev)}
-                  title="Add context or file (+)"
+                  title="Add context or file attachment"
                   className="p-1 rounded hover:bg-[#2c2c2c] text-neutral-400 hover:text-neutral-200 transition-colors"
                 >
-                  <Plus className="w-3.5 h-3.5" />
+                  <Paperclip className="w-3.5 h-3.5" />
                 </button>
 
                 {showAttachMenu && (
-                  <div className="absolute left-0 bottom-8 w-48 bg-[#222] border border-[#333] rounded-lg shadow-xl py-1 text-xs z-50">
+                  <div className="absolute left-0 bottom-8 w-52 bg-[#222] border border-[#333] rounded-lg shadow-xl py-1 text-xs z-50">
                     <button
                       onClick={() => {
                         if (activeTabPath) addAttachment(activeTabPath);
+                        else addMessage({ role: 'system', content: 'No active editor file open.' });
                         setShowAttachMenu(false);
                       }}
                       className="w-full text-left px-3 py-1.5 hover:bg-[#2b2b2b] flex items-center gap-2 text-neutral-200"
                     >
                       <FileCode className="w-3.5 h-3.5 text-cyan-400" /> Current File
+                      {activeTabPath && <span className="text-neutral-500 truncate text-[9px] ml-auto">{activeTabPath.split(/[\\/]/).pop()}</span>}
                     </button>
                     <button
                       onClick={() => {
@@ -989,6 +1258,15 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                     >
                       <Terminal className="w-3.5 h-3.5 text-cyan-400" /> Recent Terminal Logs
                     </button>
+                    <button
+                      onClick={() => {
+                        addAttachment('@problems');
+                        setShowAttachMenu(false);
+                      }}
+                      className="w-full text-left px-3 py-1.5 hover:bg-[#2b2b2b] flex items-center gap-2 text-neutral-200"
+                    >
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-400" /> Active Diagnostics
+                    </button>
                   </div>
                 )}
               </div>
@@ -998,23 +1276,50 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                 <button
                   type="button"
                   onClick={() => setShowModelPicker((prev) => !prev)}
-                  className="px-2 py-0.5 rounded bg-[#282828] hover:bg-[#303030] text-[11px] text-neutral-300 font-medium flex items-center gap-1 transition-colors"
+                  className="px-2 py-0.5 rounded bg-[#282828] hover:bg-[#303030] text-[11px] text-neutral-300 font-medium flex items-center gap-1 transition-colors max-w-[150px] truncate"
+                  title={currentModelName}
                 >
-                  <span>{currentModelName}</span>
-                  <ChevronDown className="w-2.5 h-2.5 text-neutral-400" />
+                  {modelsLoading ? (
+                    <Loader2 className="w-3 h-3 animate-spin text-cyan-400" />
+                  ) : modelsError ? (
+                    <WifiOff className="w-3 h-3 text-red-400" />
+                  ) : null}
+                  <span className="truncate">{currentModelName}</span>
+                  <ChevronDown className="w-2.5 h-2.5 text-neutral-400 shrink-0" />
                 </button>
 
                 {showModelPicker && (
-                  <div className="absolute left-0 bottom-8 w-60 bg-[#222] border border-[#333] rounded-lg shadow-xl p-1 text-xs z-50">
-                    <div className="px-2 py-1 text-[10px] text-neutral-400 font-semibold uppercase">
-                      Select LLM Provider & Model
+                  <div className="absolute left-0 bottom-8 w-72 bg-[#222] border border-[#333] rounded-lg shadow-xl p-1 text-xs z-50 max-h-64 overflow-y-auto">
+                    <div className="px-2 py-1 text-[10px] text-neutral-400 font-semibold uppercase flex items-center justify-between">
+                      <span>Select LLM Provider &amp; Model</span>
+                      <button
+                        onClick={fetchModels}
+                        disabled={modelsLoading}
+                        title="Refresh model list from connected providers"
+                        className="text-cyan-400 hover:text-cyan-300 disabled:opacity-50"
+                      >
+                        <RefreshCw className={`w-3 h-3 ${modelsLoading ? 'animate-spin' : ''}`} />
+                      </button>
                     </div>
-                    {AVAILABLE_MODELS.map((m) => (
+
+                    {modelsError && (
+                      <div className="px-2 py-1.5 text-red-400 text-[10px] flex items-center gap-1">
+                        <WifiOff className="w-3 h-3" /> {modelsError}
+                      </div>
+                    )}
+
+                    {availableModels.length === 0 && !modelsLoading && (
+                      <div className="px-2 py-2 text-neutral-500 text-[11px]">
+                        No providers connected. Add an API key in <strong>AI Providers</strong>.
+                      </div>
+                    )}
+
+                    {availableModels.map((m) => (
                       <button
                         key={m.id}
                         onClick={() => {
                           setSelectedModel(m.id);
-                          setSelectedProvider(m.provider);
+                          setSelectedProvider(m.providerType);
                           setShowModelPicker(false);
                         }}
                         className={`w-full text-left px-2 py-1.5 rounded flex items-center justify-between transition-colors ${
@@ -1024,7 +1329,13 @@ export function AiAgentPanel({ onClose, activeRole, onSelectRole }: AiAgentPanel
                         }`}
                       >
                         <span className="truncate">{m.name}</span>
-                        <span className="text-[9px] px-1.5 py-0.5 rounded bg-[#181818] text-neutral-400 font-mono">
+                        <span
+                          className={`text-[9px] px-1.5 py-0.5 rounded font-mono shrink-0 ml-2 ${
+                            m.badge?.includes('SIMULATED')
+                              ? 'bg-amber-950 text-amber-400 border border-amber-800'
+                              : 'bg-[#181818] text-neutral-400'
+                          }`}
+                        >
                           {m.badge}
                         </span>
                       </button>
