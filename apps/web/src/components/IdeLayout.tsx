@@ -9,10 +9,18 @@ import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
 import { SettingsModal } from './SettingsModal';
 import { ToastContainer } from './ToastContainer';
+import { CommandPalette } from './CommandPalette';
+import { OpenFolderModal } from './OpenFolderModal';
+import { TrustFolderDialog } from './TrustFolderDialog';
 import { useNavigate } from 'react-router-dom';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
 import { usePreferencesStore } from '../store/preferencesStore';
+import { useLayoutStore } from '../store/layoutStore';
+import { useWorkspaceStore } from '../store/workspaceStore';
+import { commandRegistry } from '../services/commandRegistry';
+import { useGlobalKeybindings } from '../services/keybindingService';
+import { initializeCoreCommands } from '../services/coreCommands';
 import {
   FileCode,
   X,
@@ -22,6 +30,16 @@ import {
   Sparkles,
   Columns,
   Code2,
+  Search,
+  Bot,
+  Terminal,
+  Bug,
+  FolderKanban,
+  Package,
+  Network,
+  ShieldAlert,
+  AlertTriangle,
+  FolderOpen,
 } from 'lucide-react';
 
 interface IdeLayoutProps {
@@ -31,6 +49,7 @@ interface IdeLayoutProps {
 export function IdeLayout({ children }: IdeLayoutProps) {
   const navigate = useNavigate();
   const { accessToken } = useAuthStore();
+  const token = accessToken || 'dev';
   const { openSettings, preferences, addToast } = usePreferencesStore();
   const {
     currentProjectId,
@@ -46,20 +65,46 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     setEditorInstance,
   } = useIdeStore();
 
-  // Layout states
-  const [activeActivityTab, setActiveActivityTab] = useState<ActivityTab | null>('explorer');
-  const [showAiPanel, setShowAiPanel] = useState(true);
-  const [showBottomPanel, setShowBottomPanel] = useState(true);
-  const [activeRole, setActiveRole] = useState('ARCHITECT');
+  const {
+    currentWorkspace,
+    activeBranch,
+    openWorkspace,
+    setTrustDialogOpen,
+    setOpenFolderModalOpen,
+  } = useWorkspaceStore();
 
-  // File tree state
-  const [files, setFiles] = useState<Array<{ path: string; isDir: boolean }>>([
-    { path: 'src/index.ts', isDir: false },
-    { path: 'src/app.ts', isDir: false },
-    { path: 'src/components/App.tsx', isDir: false },
-    { path: 'package.json', isDir: false },
-    { path: 'README.md', isDir: false },
-  ]);
+  const {
+    activeSidebarTab,
+    isSidebarOpen,
+    isBottomPanelOpen,
+    isAiPanelOpen,
+    isCommandPaletteOpen,
+    setActiveSidebarTab,
+    toggleSidebar,
+    toggleBottomPanel,
+    toggleAiPanel,
+    closeCommandPalette,
+  } = useLayoutStore();
+
+  // Initialize core commands on mount
+  useEffect(() => {
+    initializeCoreCommands();
+  }, []);
+
+  // Global keybinding hook
+  useGlobalKeybindings(() => ({
+    editorFocus: !!activeTabPath,
+    folderOpen: !!currentWorkspace || !!currentProjectId,
+    isSaving,
+  }));
+
+  // Auto-reopen last workspace from localStorage on initial load
+  useEffect(() => {
+    const lastWorkspaceRoot = localStorage.getItem('nexora_last_workspace_root');
+    if (lastWorkspaceRoot && !currentWorkspace) {
+      openWorkspace(lastWorkspaceRoot).catch(() => {});
+    }
+  }, []);
 
   const activeTab = openTabs.find((t) => t.path === activeTabPath);
 
@@ -75,126 +120,78 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     return 'plaintext';
   };
 
-  const handleOpenFile = (path: string) => {
-    // If not open, open default content
-    if (!openTabs.find((t) => t.path === path)) {
-      openFile(path, `// ${path}\n// NEXORA AI Workspace Source File\n`);
+  const handleOpenFile = async (relPath: string) => {
+    // Check if already open
+    const existing = openTabs.find((t) => t.path === relPath);
+    if (existing) {
+      setActiveTabPath(relPath);
+      return;
+    }
+
+    if (currentWorkspace) {
+      try {
+        const res = await fetch(
+          `/api/fs/read?root=${encodeURIComponent(currentWorkspace.rootPath)}&path=${encodeURIComponent(relPath)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+
+        if (!res.ok) {
+          const err = await res.json();
+          addToast('Cannot Open File', err.message || 'File access error', 'error');
+          return;
+        }
+
+        const data = await res.json();
+        if (data.binary) {
+          openFile(relPath, `[Binary file cannot be displayed or edited in text editor]\nSize: ${data.size} bytes`);
+        } else {
+          openFile(relPath, data.content);
+          if (data.warning) {
+            addToast('Large File Warning', data.warning, 'warning');
+          }
+        }
+      } catch (err: any) {
+        addToast('File Error', err.message, 'error');
+      }
     } else {
-      setActiveTabPath(path);
+      openFile(relPath, `// ${relPath}\n// NEXORA AI Source File\n`);
     }
   };
 
   const handleSaveActive = async () => {
-    if (!activeTab) return;
-    setIsSaving(true);
-
-    try {
-      if (currentProjectId && accessToken) {
-        await fetch(`/api/projects/${currentProjectId}/files/modify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ path: activeTab.path, content: activeTab.content }),
-        });
-      }
-      markSaved(activeTab.path);
-      addToast('File Saved', `${activeTab.path.split('/').pop()} saved to workspace.`, 'success');
-    } catch {
-      markSaved(activeTab.path);
-    } finally {
-      setIsSaving(false);
-    }
+    await commandRegistry.execute('workbench.action.files.save');
   };
-
-  // Load real files when currentProjectId changes
-  const refreshProjectFiles = async () => {
-    if (!currentProjectId || !accessToken) return;
-    try {
-      const res = await fetch(`/api/projects/${currentProjectId}/files`, {
-        headers: { Authorization: `Bearer ${accessToken}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        if (data.files && data.files.length > 0) {
-          setFiles(data.files.map((f: any) => ({ path: f.path, isDir: f.isDir })));
-        }
-      }
-    } catch {}
-  };
-
-  useEffect(() => {
-    refreshProjectFiles();
-  }, [currentProjectId, accessToken]);
-
-  const handleCreateFile = async (newPath: string) => {
-    setFiles((prev) => [...prev, { path: newPath, isDir: false }]);
-    const defaultContent = `// Created by NEXORA AI\n`;
-    openFile(newPath, defaultContent);
-
-    if (currentProjectId && accessToken) {
-      try {
-        await fetch(`/api/projects/${currentProjectId}/files/modify`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({ path: newPath, content: defaultContent }),
-        });
-      } catch {}
-    }
-  };
-
-  const handleCreateFolder = (folderPath: string) => {
-    setFiles((prev) => [...prev, { path: folderPath, isDir: true }]);
-    addToast('Folder Created', `Directory ${folderPath} added.`, 'info');
-  };
-
-  const handleDeleteFile = async (pathToDelete: string) => {
-    setFiles((prev) => prev.filter((f) => f.path !== pathToDelete));
-    closeTab(pathToDelete);
-
-    if (currentProjectId && accessToken) {
-      try {
-        await fetch(`/api/projects/${currentProjectId}/files?path=${encodeURIComponent(pathToDelete)}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
-        addToast('File Deleted', `${pathToDelete} removed from workspace.`, 'info');
-      } catch {}
-    }
-  };
-
-  // Ensure an initial file is open
-  useEffect(() => {
-    if (openTabs.length === 0 && files.length > 0) {
-      handleOpenFile(files[0].path);
-    }
-  }, []);
 
   return (
     <div className="flex flex-col h-screen w-screen bg-[#171717] text-neutral-200 overflow-hidden select-none font-sans">
       {/* 1. VS Code-Style Top Navbar */}
       <TopNavbar
-        currentProjectName="NEXORA AI Workspace"
-        onToggleSidebar={() =>
-          setActiveActivityTab((prev) => (prev ? null : 'explorer'))
-        }
-        onToggleAiPanel={() => setShowAiPanel((prev) => !prev)}
-        onToggleBottomPanel={() => setShowBottomPanel((prev) => !prev)}
-        onOpenSettings={openSettings}
-        onNewFile={() => handleCreateFile(`src/untitled_${Date.now().toString().slice(-4)}.ts`)}
-        onSaveFile={handleSaveActive}
-        onOpenFile={handleOpenFile}
+        currentProjectName={currentWorkspace ? currentWorkspace.name : 'NEXORA Workspace'}
       />
+
+      {/* Restricted Mode Global Warning Banner */}
+      {currentWorkspace?.isRestricted && (
+        <div className="h-7 bg-amber-950/90 border-b border-amber-700/80 px-4 flex items-center justify-between text-xs text-amber-200 z-40">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span>
+              <strong>Restricted Mode:</strong> Running in untrusted mode. AI terminal execution and file writes are restricted.
+            </span>
+          </div>
+          <button
+            onClick={() => setTrustDialogOpen(true)}
+            className="px-2.5 py-0.5 bg-amber-700 hover:bg-amber-600 text-white rounded text-[11px] font-medium transition-colors"
+          >
+            Trust This Folder
+          </button>
+        </div>
+      )}
 
       {/* 2. Main Middle Workspace Grid */}
       <div className="flex flex-1 overflow-hidden relative">
         {/* Left Activity Bar */}
         <ActivityBar
-          activeTab={activeActivityTab}
+          activeTab={activeSidebarTab}
           onSelectTab={(tab) => {
             if (tab === 'universal-apis') {
               navigate('/api-manager');
@@ -208,31 +205,88 @@ export function IdeLayout({ children }: IdeLayoutProps) {
               navigate('/new-project');
               return;
             }
-            if (activeActivityTab === tab) {
-              setActiveActivityTab(null);
-            } else {
-              setActiveActivityTab(tab);
-            }
+            setActiveSidebarTab(tab);
           }}
         />
 
-        {/* Primary Sidebar (Explorer or secondary tools) */}
-        {activeActivityTab === 'explorer' && (
-          <ExplorerSidebar
-            projectName="NEXORA Workspace"
-            files={files}
-            activeFilePath={activeTabPath || undefined}
-            onOpenFile={handleOpenFile}
-            onCreateFile={handleCreateFile}
-            onCreateFolder={handleCreateFolder}
-            onDeleteFile={handleDeleteFile}
-            onRefresh={refreshProjectFiles}
-          />
-        )}
+        {/* Primary Dynamic Sidebar Slot */}
+        {isSidebarOpen && (
+          <aside className="w-64 border-r border-[#2b2b2b] bg-[#181818] flex flex-col shrink-0 select-none">
+            {activeSidebarTab === 'explorer' && (
+              <ExplorerSidebar
+                activeFilePath={activeTabPath || undefined}
+                onOpenFile={handleOpenFile}
+              />
+            )}
 
-        {/* Source Control & GitHub Remote Sidebar */}
-        {activeActivityTab === 'git' && (
-          <SourceControlSidebar onOpenFile={handleOpenFile} />
+            {activeSidebarTab === 'git' && (
+              <SourceControlSidebar onOpenFile={handleOpenFile} />
+            )}
+
+            {activeSidebarTab === 'search' && (
+              <div className="flex-1 flex flex-col p-3 text-xs">
+                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
+                  <Search className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Search in Files</span>
+                </div>
+                <div className="mt-3 space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Search workspace..."
+                    className="w-full bg-[#141414] border border-[#333] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-cyan-500 font-mono"
+                  />
+                  <div className="text-[10px] text-neutral-500">
+                    Phase 4 will connect real Ripgrep fulltext search.
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'debug' && (
+              <div className="flex-1 flex flex-col p-3 text-xs">
+                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
+                  <Bug className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Run & Debug Configurations</span>
+                </div>
+                <div className="mt-3 text-neutral-400">
+                  <p>Run configurations active in Bottom Panel.</p>
+                  <button
+                    onClick={toggleBottomPanel}
+                    className="mt-2 px-3 py-1 bg-[#252526] hover:bg-[#2d2d2d] border border-[#333] rounded text-neutral-200 text-xs"
+                  >
+                    Open Terminal / Debug
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'agents' && (
+              <div className="flex-1 flex flex-col p-3 text-xs">
+                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
+                  <Bot className="w-3.5 h-3.5 text-cyan-400" />
+                  <span>Engineering Agent Roster</span>
+                </div>
+                <div className="mt-3 space-y-1.5 overflow-y-auto">
+                  {['ARCHITECT', 'DEVELOPER', 'TESTER', 'DEBUGGER', 'SECURITY', 'UI_UX', 'PROJECT_MANAGER'].map((role) => (
+                    <div key={role} className="p-2 rounded bg-[#202020] border border-[#2b2b2b]">
+                      <div className="font-semibold text-cyan-300">{role}</div>
+                      <div className="text-[10px] text-neutral-400">Autonomous role active</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {activeSidebarTab === 'terminal' && (
+              <div className="flex-1 flex flex-col p-3 text-xs">
+                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
+                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Integrated Terminal</span>
+                </div>
+                <p className="mt-3 text-neutral-400">Focusing terminal in bottom workspace panel...</p>
+              </div>
+            )}
+          </aside>
         )}
 
         {/* Central Editor / Viewport Area */}
@@ -250,25 +304,23 @@ export function IdeLayout({ children }: IdeLayoutProps) {
                       <div
                         key={tab.path}
                         onClick={() => setActiveTabPath(tab.path)}
-                        className={`group flex items-center gap-2 px-3 py-1.5 text-xs border-r border-[#2d2d2d] cursor-pointer transition-colors ${
+                        className={`h-7 px-3 flex items-center gap-2 text-xs border-r border-[#262626] cursor-pointer transition-colors ${
                           isActive
-                            ? 'bg-[#1e1e1e] text-cyan-300 border-t-2 border-t-cyan-400 font-medium'
-                            : 'bg-[#181818] text-neutral-400 hover:bg-[#202020] hover:text-neutral-200'
+                            ? 'bg-[#1e1e1e] text-white border-t-2 border-t-cyan-500 font-medium'
+                            : 'bg-[#141414] text-neutral-400 hover:bg-[#1a1a1a] hover:text-neutral-200'
                         }`}
                       >
                         <FileCode className="w-3.5 h-3.5 text-cyan-400 shrink-0" />
-                        <span className="truncate max-w-[140px] font-mono text-[11px]">
-                          {tab.path.split('/').pop()}
-                        </span>
+                        <span className="truncate max-w-[120px]">{tab.name}</span>
                         {tab.isDirty && (
-                          <span className="w-2 h-2 rounded-full bg-cyan-400" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />
                         )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
                             closeTab(tab.path);
                           }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 hover:text-white rounded"
+                          className="hover:bg-neutral-700/50 p-0.5 rounded text-neutral-500 hover:text-white"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -277,126 +329,92 @@ export function IdeLayout({ children }: IdeLayoutProps) {
                   })}
                 </div>
 
-                {/* Tab Bar Actions */}
-                <div className="flex items-center gap-1 text-neutral-400">
+                {/* Editor Quick Actions */}
+                <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={handleSaveActive}
                     title="Save File (Ctrl+S)"
-                    className="p-1 hover:text-white hover:bg-[#282828] rounded transition-colors"
+                    className="p-1 hover:bg-[#2c2c2c] rounded text-neutral-400 hover:text-white"
                   >
                     <Save className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    title="Run Project in Sandbox"
-                    className="p-1 hover:text-cyan-400 hover:bg-[#282828] rounded transition-colors"
-                  >
-                    <Play className="w-3.5 h-3.5" />
                   </button>
                 </div>
               </div>
 
               {/* Monaco Editor Container */}
-              <div className="flex-1 relative overflow-hidden bg-[#1e1e1e]">
+              <div className="flex-1 relative overflow-hidden">
                 {activeTab ? (
                   <Editor
                     height="100%"
                     language={getLanguage(activeTab.path)}
-                    value={activeTab.content}
-                    onMount={(editor) => setEditorInstance(editor)}
-                    onChange={(val) => updateTabContent(activeTab.path, val || '')}
                     theme="vs-dark"
+                    value={activeTab.content}
+                    onChange={(val) => updateTabContent(activeTab.path, val || '')}
+                    onMount={(editor) => setEditorInstance(editor)}
                     options={{
-                      minimap: { enabled: true },
-                      fontSize: 13,
-                      fontFamily: "'JetBrains Mono', monospace",
+                      fontSize: preferences.fontSize || 13,
+                      tabSize: preferences.tabSize || 2,
+                      minimap: { enabled: preferences.minimap },
+                      wordWrap: preferences.wordWrap ? 'on' : 'off',
                       scrollBeyondLastLine: false,
                       automaticLayout: true,
-                      tabSize: 2,
-                      lineNumbers: 'on',
-                      renderLineHighlight: 'all',
-                      bracketPairColorization: { enabled: true },
                     }}
                   />
                 ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-neutral-400 p-8 text-center select-none">
-                    <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-cyan-600/30 to-blue-600/30 border border-cyan-500/30 flex items-center justify-center text-cyan-400 mb-4 shadow-lg">
-                      <Sparkles className="w-8 h-8" />
-                    </div>
-                    <h2 className="text-lg font-bold text-neutral-100 mb-1">NEXORA AI Workspace</h2>
-                    <p className="text-xs text-neutral-400 max-w-md mb-6">
-                      Autonomous AI Software Engineering IDE. Select a file from the explorer, open a command palette, or ask your AI Agent to build full-stack features.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3 max-w-sm w-full text-left">
+                  <div className="h-full flex flex-col items-center justify-center text-neutral-500 text-xs select-none">
+                    <Code2 className="w-10 h-10 mb-2 opacity-30 text-cyan-400" />
+                    <span>No file is currently open. Select a file from Explorer or press Ctrl+P.</span>
+                    {!currentWorkspace && (
                       <button
-                        onClick={() => handleCreateFile(`src/feature_${Date.now().toString().slice(-4)}.ts`)}
-                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
+                        onClick={() => setOpenFolderModalOpen(true)}
+                        className="mt-3 px-3.5 py-1.5 bg-[#252526] hover:bg-[#2d2d2d] border border-[#3c3c3c] rounded text-neutral-200 text-xs flex items-center gap-1.5 transition-colors"
                       >
-                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
-                          + New Source File
-                        </span>
-                        <span className="text-[10px] text-neutral-500">Create and edit code</span>
+                        <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                        <span>Open Folder...</span>
                       </button>
-                      <button
-                        onClick={() => navigate('/new-project')}
-                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
-                      >
-                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
-                          📦 New Project
-                        </span>
-                        <span className="text-[10px] text-neutral-500">Prompt-to-App Generator</span>
-                      </button>
-                      <button
-                        onClick={() => navigate('/api-manager')}
-                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
-                      >
-                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
-                          🔌 Universal APIs
-                        </span>
-                        <span className="text-[10px] text-neutral-500">Connect external tokens</span>
-                      </button>
-                      <button
-                        onClick={() => setShowAiPanel(true)}
-                        className="p-3 bg-[#242424] hover:bg-[#2c2c2c] border border-[#333] rounded-lg transition-colors group"
-                      >
-                        <span className="text-xs font-semibold text-neutral-200 block group-hover:text-cyan-400">
-                          ✨ AI Autonomous Agent
-                        </span>
-                        <span className="text-[10px] text-neutral-500">Design, code & debug</span>
-                      </button>
-                    </div>
+                    )}
                   </div>
                 )}
               </div>
-
-              {/* Retractable Bottom Panel */}
-              {showBottomPanel && (
-                <BottomPanel
-                  onClose={() => setShowBottomPanel(false)}
-                  onOpenProblemFile={handleOpenFile}
-                />
-              )}
             </>
+          )}
+
+          {/* Bottom Terminal & Diagnostics Panel */}
+          {isBottomPanelOpen && (
+            <BottomPanel onClose={toggleBottomPanel} onOpenProblemFile={handleOpenFile} />
           )}
         </main>
 
-        {/* Right AI Agent Sidebar Panel */}
-        {showAiPanel && (
-          <AiAgentPanel
-            activeRole={activeRole}
-            onSelectRole={(r) => setActiveRole(r)}
-            onClose={() => setShowAiPanel(false)}
-          />
-        )}
+        {/* Right AI Agent Panel */}
+        {isAiPanelOpen && <AiAgentPanel onClose={toggleAiPanel} />}
       </div>
 
       {/* 3. Bottom Status Bar */}
       <StatusBar
-        branchName="main"
-        activeLanguage={activeTab ? getLanguage(activeTab.path).toUpperCase() : 'TYPESCRIPT'}
+        activeLanguage={activeTab ? getLanguage(activeTab.path) : 'TypeScript'}
+        branchName={activeBranch || 'main'}
+        isRestricted={currentWorkspace?.isRestricted}
+        onOpenTrustDialog={() => setTrustDialogOpen(true)}
+        currentProjectId={currentProjectId || undefined}
         isSaving={isSaving}
       />
 
-      {/* Global Modals & Notifications */}
+      {/* 4. Global Command Palette & Quick Open Modal */}
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        onClose={closeCommandPalette}
+        files={[]}
+        onOpenFile={handleOpenFile}
+        context={{
+          editorFocus: !!activeTabPath,
+          folderOpen: !!currentWorkspace || !!currentProjectId,
+          isSaving,
+        }}
+      />
+
+      {/* 5. Modals and Notifications */}
+      <OpenFolderModal />
+      <TrustFolderDialog />
       <SettingsModal />
       <ToastContainer />
     </div>

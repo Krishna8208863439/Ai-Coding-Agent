@@ -13,6 +13,9 @@ import { terminalRouter } from './routes/terminal';
 import { testingRouter } from './routes/testing';
 import { githubRouter } from './routes/github';
 import { universalApisRouter } from './routes/universalApis';
+import { workspaceRouter } from './routes/workspace';
+import { fsRouter } from './routes/fs';
+import { gitRouter } from './routes/git';
 import { errorHandler } from './middleware/errorHandler';
 import { requestIdMiddleware } from './middleware/requestId';
 import { prisma } from './lib/prisma';
@@ -143,6 +146,9 @@ app.use('/api/terminal', terminalRouter);
 app.use('/api/testing', testingRouter);
 app.use('/api/github', githubRouter);
 app.use('/api/universal-apis', universalApisRouter);
+app.use('/api/workspace', workspaceRouter);
+app.use('/api/fs', fsRouter);
+app.use('/api/git', gitRouter);
 
 // Global Error Handler — Must be mounted after all routes
 app.use(errorHandler);

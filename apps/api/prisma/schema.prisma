@@ -30,6 +30,7 @@ model User {
   userSettings  UserSettings?
   apiConfigurations ApiConfiguration[]
   apiRequestLogs    ApiRequestLog[]
+  recentWorkspaces  RecentWorkspace[]
 
   @@index([email])
   @@map("users")
@@ -92,15 +93,19 @@ model Approval {
 }
 
 model Project {
-  id          String        @id @default(cuid())
-  userId      String
-  name        String
-  description String?
-  template    String        // react, node, python, nextjs, java
-  status      String        @default("READY") // READY, GENERATING, ERROR
+  id           String        @id @default(cuid())
+  userId       String
+  name         String
+  description  String?
+  template     String        @default("custom") // react, node, python, nextjs, java, custom
+  status       String        @default("READY") // READY, GENERATING, ERROR
   workspaceDir String
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  kind         String        @default("SANDBOX") // SANDBOX, LOCAL_FOLDER
+  rootPath     String?
+  trusted      Boolean       @default(false)
+  lastOpenedAt DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   files       ProjectFile[]
@@ -108,6 +113,23 @@ model Project {
 
   @@index([userId])
   @@map("projects")
+}
+
+model RecentWorkspace {
+  id           String    @id @default(cuid())
+  userId       String
+  path         String
+  name         String
+  isPinned     Boolean   @default(false)
+  trusted      Boolean   @default(false)
+  lastOpenedAt DateTime  @default(now())
+  createdAt    DateTime  @default(now())
+
+  user         User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, path])
+  @@index([userId])
+  @@map("recent_workspaces")
 }
 
 model ProjectFile {

@@ -5,6 +5,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Radio,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface StatusBarProps {
@@ -12,6 +13,8 @@ interface StatusBarProps {
   activeLanguage?: string;
   currentProjectId?: string;
   isSaving?: boolean;
+  isRestricted?: boolean;
+  onOpenTrustDialog?: () => void;
 }
 
 interface SystemHealthData {
@@ -28,6 +31,8 @@ export function StatusBar({
   activeLanguage = 'TypeScript',
   currentProjectId,
   isSaving = false,
+  isRestricted = false,
+  onOpenTrustDialog,
 }: StatusBarProps) {
   const [health, setHealth] = useState<SystemHealthData | null>(null);
   const [errorCount, setErrorCount] = useState<number>(0);
@@ -68,6 +73,17 @@ export function StatusBar({
           <GitBranch className="w-3 h-3" />
           <span>{branchName}</span>
         </div>
+
+        {isRestricted && (
+          <div
+            onClick={onOpenTrustDialog}
+            className="flex items-center gap-1 bg-amber-600/90 hover:bg-amber-500 px-1.5 py-0.5 rounded cursor-pointer text-white font-medium text-[10px]"
+            title="Restricted Mode: Click to Trust Workspace"
+          >
+            <ShieldAlert className="w-3 h-3 text-amber-200" />
+            <span>Restricted Mode</span>
+          </div>
+        )}
 
         <div className="flex items-center gap-1 hover:bg-white/10 px-1.5 py-0.5 rounded cursor-pointer" title="Synchronize">
           <RefreshCw className="w-3 h-3" />
