@@ -3,11 +3,10 @@ import { useLayoutStore } from '../store/layoutStore';
 import { useIdeStore } from '../store/ideStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import { usePreferencesStore } from '../store/preferencesStore';
-import { useAuthStore } from '../store/authStore';
 
 export function initializeCoreCommands() {
   const commands: CommandDefinition[] = [
-    // ─── File Menu Commands ──────────────────────────────────────────────
+    // ─── File Menu Commands ───────────────────────────────────────────
     {
       id: 'workbench.action.files.openFolder',
       title: 'Open Folder...',
@@ -15,6 +14,15 @@ export function initializeCoreCommands() {
       keybinding: 'Ctrl+K Ctrl+O',
       handler: () => {
         useWorkspaceStore.getState().setOpenFolderModalOpen(true);
+      },
+    },
+    {
+      id: 'workbench.action.files.openFile',
+      title: 'Open File...',
+      category: 'File',
+      keybinding: 'Ctrl+O',
+      handler: () => {
+        useLayoutStore.getState().openCommandPalette('');
       },
     },
     {
@@ -37,6 +45,16 @@ export function initializeCoreCommands() {
       },
     },
     {
+      id: 'workbench.action.closeActiveEditor',
+      title: 'Close Editor',
+      category: 'File',
+      keybinding: 'Ctrl+W',
+      handler: () => {
+        const { activeTabPath, closeTab } = useIdeStore.getState();
+        if (activeTabPath) closeTab(activeTabPath);
+      },
+    },
+    {
       id: 'workbench.action.files.newFile',
       title: 'New File',
       category: 'File',
@@ -45,6 +63,15 @@ export function initializeCoreCommands() {
         const { openFile } = useIdeStore.getState();
         const path = `untitled_${Date.now().toString().slice(-4)}.ts`;
         openFile(path, '// New file\n');
+      },
+    },
+    {
+      id: 'workbench.action.files.newFolder',
+      title: 'New Folder',
+      category: 'File',
+      handler: () => {
+        // Dispatches a custom event that ExplorerSidebar listens to
+        window.dispatchEvent(new CustomEvent('nexora:newFolder'));
       },
     },
     {
@@ -63,7 +90,6 @@ export function initializeCoreCommands() {
         setIsSaving(true);
         try {
           if (currentWorkspace) {
-            // Write to real disk folder
             const res = await fetch('/api/fs/write', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -81,7 +107,6 @@ export function initializeCoreCommands() {
               usePreferencesStore.getState().addToast('Save Failed', err.message || 'Cannot write to disk', 'error');
             }
           } else {
-            // Memory / sandbox save
             markSaved(active.path);
             usePreferencesStore.getState().addToast('Saved', `${active.path} saved in memory.`, 'success');
           }
@@ -90,6 +115,15 @@ export function initializeCoreCommands() {
         } finally {
           setIsSaving(false);
         }
+      },
+    },
+    {
+      id: 'workbench.action.files.saveAs',
+      title: 'Save As...',
+      category: 'File',
+      keybinding: 'Ctrl+Shift+S',
+      handler: () => {
+        useLayoutStore.getState().openSaveAsModal();
       },
     },
     {
@@ -132,6 +166,8 @@ export function initializeCoreCommands() {
         useWorkspaceStore.getState().setTrustDialogOpen(true);
       },
     },
+
+    // ─── Layout / View Commands ───────────────────────────────────────
     {
       id: 'workbench.action.toggleSidebar',
       title: 'Toggle Primary Sidebar',
@@ -147,7 +183,9 @@ export function initializeCoreCommands() {
       category: 'View',
       keybinding: 'Ctrl+`',
       handler: () => {
-        useLayoutStore.getState().toggleBottomPanel();
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('terminal');
+        if (!isBottomPanelOpen) toggleBottomPanel();
       },
     },
     {
@@ -186,8 +224,113 @@ export function initializeCoreCommands() {
         usePreferencesStore.getState().openSettings();
       },
     },
+    {
+      id: 'workbench.action.toggleStatusBar',
+      title: 'Toggle Status Bar',
+      category: 'View',
+      handler: () => {
+        useLayoutStore.getState().toggleStatusBar();
+      },
+    },
+    {
+      id: 'workbench.action.toggleFullScreen',
+      title: 'Toggle Full Screen',
+      category: 'View',
+      keybinding: 'F11',
+      handler: () => {
+        useLayoutStore.getState().toggleFullScreen();
+      },
+    },
+    {
+      id: 'workbench.action.zoomIn',
+      title: 'Zoom In',
+      category: 'View',
+      keybinding: 'Ctrl+=',
+      handler: () => {
+        useLayoutStore.getState().zoomIn();
+      },
+    },
+    {
+      id: 'workbench.action.zoomOut',
+      title: 'Zoom Out',
+      category: 'View',
+      keybinding: 'Ctrl+-',
+      handler: () => {
+        useLayoutStore.getState().zoomOut();
+      },
+    },
+    {
+      id: 'workbench.action.resetZoom',
+      title: 'Reset Zoom',
+      category: 'View',
+      keybinding: 'Ctrl+0',
+      handler: () => {
+        useLayoutStore.getState().resetZoom();
+      },
+    },
 
-    // ─── Edit Commands (Routed to Monaco instance) ──────────────────────
+    // ─── Bottom Panel Tab Switching ──────────────────────────────────
+    {
+      id: 'workbench.view.output',
+      title: 'Open Output Panel',
+      category: 'View',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('output');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+      },
+    },
+    {
+      id: 'workbench.view.problems',
+      title: 'Open Problems Panel',
+      category: 'View',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('problems');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+      },
+    },
+    {
+      id: 'workbench.view.debug',
+      title: 'Open Debug Console',
+      category: 'View',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('debug');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+      },
+    },
+    {
+      id: 'workbench.view.preview',
+      title: 'Open Live Preview',
+      category: 'View',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('preview');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+      },
+    },
+
+    // ─── Help Commands ───────────────────────────────────────────────
+    {
+      id: 'workbench.action.openKeybindingsReference',
+      title: 'Keyboard Shortcuts Reference',
+      category: 'Help',
+      keybinding: 'Ctrl+K Ctrl+S',
+      handler: () => {
+        useLayoutStore.getState().openKeybindingsModal();
+      },
+    },
+    {
+      id: 'workbench.action.showAbout',
+      title: 'About NEXORA AI',
+      category: 'Help',
+      handler: () => {
+        useLayoutStore.getState().openAboutModal();
+      },
+    },
+
+    // ─── Edit Commands (Routed to Monaco instance) ───────────────────
     {
       id: 'editor.action.undo',
       title: 'Undo',
@@ -203,11 +346,153 @@ export function initializeCoreCommands() {
       handler: () => useIdeStore.getState().triggerEditorAction('redo'),
     },
     {
+      id: 'editor.action.cut',
+      title: 'Cut',
+      category: 'Edit',
+      keybinding: 'Ctrl+X',
+      handler: () => useIdeStore.getState().triggerEditorAction('cut'),
+    },
+    {
+      id: 'editor.action.copy',
+      title: 'Copy',
+      category: 'Edit',
+      keybinding: 'Ctrl+C',
+      handler: () => useIdeStore.getState().triggerEditorAction('copy'),
+    },
+    {
+      id: 'editor.action.paste',
+      title: 'Paste',
+      category: 'Edit',
+      keybinding: 'Ctrl+V',
+      handler: () => useIdeStore.getState().triggerEditorAction('paste'),
+    },
+    {
+      id: 'editor.action.find',
+      title: 'Find',
+      category: 'Edit',
+      keybinding: 'Ctrl+F',
+      handler: () => useIdeStore.getState().triggerEditorAction('find'),
+    },
+    {
+      id: 'editor.action.replace',
+      title: 'Replace',
+      category: 'Edit',
+      keybinding: 'Ctrl+H',
+      handler: () => useIdeStore.getState().triggerEditorAction('replace'),
+    },
+    {
+      id: 'editor.action.findInFiles',
+      title: 'Find in Files',
+      category: 'Edit',
+      keybinding: 'Ctrl+Shift+F',
+      handler: () => {
+        // Open search sidebar
+        useLayoutStore.getState().setActiveSidebarTab('search');
+      },
+    },
+    {
+      id: 'editor.action.replaceInFiles',
+      title: 'Replace in Files',
+      category: 'Edit',
+      keybinding: 'Ctrl+Shift+H',
+      handler: () => {
+        useLayoutStore.getState().setActiveSidebarTab('search');
+      },
+    },
+    {
       id: 'editor.action.formatDocument',
       title: 'Format Document',
       category: 'Edit',
       keybinding: 'Shift+Alt+F',
       handler: () => useIdeStore.getState().triggerEditorAction('format'),
+    },
+    {
+      id: 'editor.action.toggleLineComment',
+      title: 'Toggle Line Comment',
+      category: 'Edit',
+      keybinding: 'Ctrl+/',
+      handler: () => useIdeStore.getState().triggerEditorAction('toggleLineComment'),
+    },
+
+    // ─── Selection Commands ──────────────────────────────────────────
+    {
+      id: 'editor.action.selectAll',
+      title: 'Select All',
+      category: 'Selection',
+      keybinding: 'Ctrl+A',
+      handler: () => useIdeStore.getState().triggerEditorAction('selectAll'),
+    },
+    {
+      id: 'editor.action.expandSelection',
+      title: 'Expand Selection',
+      category: 'Selection',
+      keybinding: 'Shift+Alt+Right',
+      handler: () => useIdeStore.getState().triggerEditorAction('expandSelection'),
+    },
+    {
+      id: 'editor.action.shrinkSelection',
+      title: 'Shrink Selection',
+      category: 'Selection',
+      keybinding: 'Shift+Alt+Left',
+      handler: () => useIdeStore.getState().triggerEditorAction('shrinkSelection'),
+    },
+    {
+      id: 'editor.action.addCursorAbove',
+      title: 'Add Cursor Above',
+      category: 'Selection',
+      keybinding: 'Ctrl+Alt+Up',
+      handler: () => useIdeStore.getState().triggerEditorAction('addCursorAbove'),
+    },
+    {
+      id: 'editor.action.addCursorBelow',
+      title: 'Add Cursor Below',
+      category: 'Selection',
+      keybinding: 'Ctrl+Alt+Down',
+      handler: () => useIdeStore.getState().triggerEditorAction('addCursorBelow'),
+    },
+    {
+      id: 'editor.action.copyLineUp',
+      title: 'Copy Line Up',
+      category: 'Selection',
+      keybinding: 'Shift+Alt+Up',
+      handler: () => useIdeStore.getState().triggerEditorAction('copyLineUp'),
+    },
+    {
+      id: 'editor.action.copyLineDown',
+      title: 'Copy Line Down',
+      category: 'Selection',
+      keybinding: 'Shift+Alt+Down',
+      handler: () => useIdeStore.getState().triggerEditorAction('copyLineDown'),
+    },
+    {
+      id: 'editor.action.moveLineUp',
+      title: 'Move Line Up',
+      category: 'Selection',
+      keybinding: 'Alt+Up',
+      handler: () => useIdeStore.getState().triggerEditorAction('moveLineUp'),
+    },
+    {
+      id: 'editor.action.moveLineDown',
+      title: 'Move Line Down',
+      category: 'Selection',
+      keybinding: 'Alt+Down',
+      handler: () => useIdeStore.getState().triggerEditorAction('moveLineDown'),
+    },
+
+    // ─── Go Commands ─────────────────────────────────────────────────
+    {
+      id: 'workbench.action.navigateBack',
+      title: 'Go Back',
+      category: 'Go',
+      keybinding: 'Alt+Left',
+      handler: () => useIdeStore.getState().triggerEditorAction('navigateBack'),
+    },
+    {
+      id: 'workbench.action.navigateForward',
+      title: 'Go Forward',
+      category: 'Go',
+      keybinding: 'Alt+Right',
+      handler: () => useIdeStore.getState().triggerEditorAction('navigateForward'),
     },
     {
       id: 'editor.action.gotoLine',
@@ -216,8 +501,15 @@ export function initializeCoreCommands() {
       keybinding: 'Ctrl+G',
       handler: () => useIdeStore.getState().triggerEditorAction('gotoLine'),
     },
+    {
+      id: 'workbench.action.gotoSymbol',
+      title: 'Go to Symbol in Workspace...',
+      category: 'Go',
+      keybinding: 'Ctrl+Shift+O',
+      handler: () => useLayoutStore.getState().openCommandPalette('@'),
+    },
 
-    // ─── Activity Bar Views Switching ────────────────────────────────────
+    // ─── Activity Bar Views Switching ────────────────────────────────
     {
       id: 'workbench.view.explorer',
       title: 'Focus on Explorer View',
@@ -229,7 +521,6 @@ export function initializeCoreCommands() {
       id: 'workbench.view.search',
       title: 'Focus on Search in Workspace',
       category: 'View',
-      keybinding: 'Ctrl+Shift+F',
       handler: () => useLayoutStore.getState().setActiveSidebarTab('search'),
     },
     {
@@ -245,6 +536,89 @@ export function initializeCoreCommands() {
       category: 'View',
       keybinding: 'Ctrl+Shift+D',
       handler: () => useLayoutStore.getState().setActiveSidebarTab('debug'),
+    },
+
+    // ─── Run / Debug Commands ────────────────────────────────────────
+    {
+      id: 'workbench.action.debug.start',
+      title: 'Start Debugging',
+      category: 'Run',
+      keybinding: 'F5',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('debug');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+        window.dispatchEvent(new CustomEvent('nexora:debug:start'));
+      },
+    },
+    {
+      id: 'workbench.action.debug.run',
+      title: 'Run Without Debugging',
+      category: 'Run',
+      keybinding: 'Ctrl+F5',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('terminal');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+        window.dispatchEvent(new CustomEvent('nexora:run:start'));
+      },
+    },
+    {
+      id: 'workbench.action.debug.stop',
+      title: 'Stop',
+      category: 'Run',
+      keybinding: 'Shift+F5',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('nexora:run:stop'));
+      },
+    },
+    {
+      id: 'workbench.action.debug.restart',
+      title: 'Restart',
+      category: 'Run',
+      keybinding: 'Ctrl+Shift+F5',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('nexora:run:restart'));
+      },
+    },
+
+    // ─── Terminal Commands ───────────────────────────────────────────
+    {
+      id: 'workbench.action.terminal.new',
+      title: 'New Terminal',
+      category: 'Terminal',
+      keybinding: 'Ctrl+Shift+`',
+      handler: () => {
+        const { isBottomPanelOpen, toggleBottomPanel, setActiveBottomPanelTab } = useLayoutStore.getState();
+        setActiveBottomPanelTab('terminal');
+        if (!isBottomPanelOpen) toggleBottomPanel();
+        window.dispatchEvent(new CustomEvent('nexora:terminal:new'));
+      },
+    },
+    {
+      id: 'workbench.action.terminal.split',
+      title: 'Split Terminal',
+      category: 'Terminal',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('nexora:terminal:split'));
+      },
+    },
+    {
+      id: 'workbench.action.terminal.runSelectedText',
+      title: 'Run Selected Text in Terminal',
+      category: 'Terminal',
+      handler: () => {
+        // Dispatches event; BottomPanel terminal picks it up with document.getSelection
+        window.dispatchEvent(new CustomEvent('nexora:terminal:runSelectedText'));
+      },
+    },
+    {
+      id: 'workbench.action.terminal.clear',
+      title: 'Clear Terminal',
+      category: 'Terminal',
+      handler: () => {
+        window.dispatchEvent(new CustomEvent('nexora:terminal:clear'));
+      },
     },
   ];
 

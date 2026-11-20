@@ -12,6 +12,9 @@ import { ToastContainer } from './ToastContainer';
 import { CommandPalette } from './CommandPalette';
 import { OpenFolderModal } from './OpenFolderModal';
 import { TrustFolderDialog } from './TrustFolderDialog';
+import { AboutDialog } from './AboutDialog';
+import { KeyboardShortcutsModal } from './KeyboardShortcutsModal';
+import { SaveAsModal } from './SaveAsModal';
 import { useNavigate } from 'react-router-dom';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
@@ -79,6 +82,8 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     isBottomPanelOpen,
     isAiPanelOpen,
     isCommandPaletteOpen,
+    isStatusBarVisible,
+    zoomLevel,
     setActiveSidebarTab,
     toggleSidebar,
     toggleBottomPanel,
@@ -390,6 +395,7 @@ export function IdeLayout({ children }: IdeLayoutProps) {
       </div>
 
       {/* 3. Bottom Status Bar */}
+      {isStatusBarVisible && (
       <StatusBar
         activeLanguage={activeTab ? getLanguage(activeTab.path) : 'TypeScript'}
         branchName={activeBranch || 'main'}
@@ -397,7 +403,10 @@ export function IdeLayout({ children }: IdeLayoutProps) {
         onOpenTrustDialog={() => setTrustDialogOpen(true)}
         currentProjectId={currentProjectId || undefined}
         isSaving={isSaving}
+        zoomLevel={zoomLevel}
       />
+      )}
+
 
       {/* 4. Global Command Palette & Quick Open Modal */}
       <CommandPalette
@@ -416,6 +425,9 @@ export function IdeLayout({ children }: IdeLayoutProps) {
       <OpenFolderModal />
       <TrustFolderDialog />
       <SettingsModal />
+      <AboutDialog />
+      <KeyboardShortcutsModal />
+      <SaveAsModal />
       <ToastContainer />
     </div>
   );

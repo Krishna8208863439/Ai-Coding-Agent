@@ -15,6 +15,7 @@ interface StatusBarProps {
   isSaving?: boolean;
   isRestricted?: boolean;
   onOpenTrustDialog?: () => void;
+  zoomLevel?: number;
 }
 
 interface SystemHealthData {
@@ -33,6 +34,7 @@ export function StatusBar({
   isSaving = false,
   isRestricted = false,
   onOpenTrustDialog,
+  zoomLevel = 1.0,
 }: StatusBarProps) {
   const [health, setHealth] = useState<SystemHealthData | null>(null);
   const [errorCount, setErrorCount] = useState<number>(0);
@@ -135,6 +137,15 @@ export function StatusBar({
         <div className="hover:bg-white/10 px-1.5 py-0.5 rounded cursor-pointer font-medium">
           <span>{activeLanguage}</span>
         </div>
+        {zoomLevel !== 1.0 && (
+          <div
+            className="hover:bg-white/10 px-1.5 py-0.5 rounded cursor-pointer font-mono"
+            title="Reset Zoom (Ctrl+0)"
+            onClick={() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '0', ctrlKey: true }))}
+          >
+            {Math.round(zoomLevel * 100)}%
+          </div>
+        )}
       </div>
     </footer>
   );

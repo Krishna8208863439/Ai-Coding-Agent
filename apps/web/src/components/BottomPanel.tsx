@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
+import { useLayoutStore } from '../store/layoutStore';
 
 interface BottomPanelProps {
   onClose?: () => void;
@@ -38,7 +39,6 @@ export function BottomPanel({
   ],
   onOpenProblemFile,
 }: BottomPanelProps) {
-  const [activeTab, setActiveTab] = useState<'terminal' | 'output' | 'problems' | 'debug' | 'preview'>('terminal');
   const [commandInput, setCommandInput] = useState('');
   const [logs, setLogs] = useState<string[]>(terminalLogs);
   const [isExecuting, setIsExecuting] = useState(false);
@@ -52,6 +52,7 @@ export function BottomPanel({
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   const { diagnostics, currentProjectId } = useIdeStore();
   const { accessToken } = useAuthStore();
+  const { activeBottomPanelTab: activeTab, setActiveBottomPanelTab: setActiveTab } = useLayoutStore();
 
   // Auto-scroll logs
   useEffect(() => {
