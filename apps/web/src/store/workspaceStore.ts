@@ -50,6 +50,7 @@ interface WorkspaceState {
   fetchRecentWorkspaces: () => Promise<void>;
   fetchFileTree: (subpath?: string) => Promise<void>;
   toggleFolderExpand: (folderPath: string) => Promise<void>;
+  setActiveBranch: (branch: string | null) => void;
   fetchGitBranch: () => Promise<void>;
   setOpenFolderModalOpen: (open: boolean) => void;
   setTrustDialogOpen: (open: boolean) => void;
@@ -209,6 +210,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
     } catch {}
   },
+
+  setActiveBranch: (activeBranch) => set({ activeBranch }),
 
   fetchGitBranch: async () => {
     const { currentWorkspace } = get();

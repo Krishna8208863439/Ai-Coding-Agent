@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import Editor from '@monaco-editor/react';
+import Editor, { DiffEditor } from '@monaco-editor/react';
 import { TopNavbar } from './TopNavbar';
 import { ActivityBar, ActivityTab } from './ActivityBar';
 import { ExplorerSidebar } from './ExplorerSidebar';
 import { SourceControlSidebar } from './SourceControlSidebar';
+import { SearchSidebar } from './SearchSidebar';
 import { AiAgentPanel } from './AiAgentPanel';
 import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
@@ -60,12 +61,14 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     activeTabPath,
     isSaving,
     openFile,
+    openDiffTab,
     closeTab,
     setActiveTabPath,
     updateTabContent,
     setIsSaving,
     markSaved,
     setEditorInstance,
+    editorInstance,
   } = useIdeStore();
 
   const {
@@ -125,11 +128,15 @@ export function IdeLayout({ children }: IdeLayoutProps) {
     return 'plaintext';
   };
 
-  const handleOpenFile = async (relPath: string) => {
+  const handleOpenFile = async (relPath: string, lineNumber?: number) => {
     // Check if already open
     const existing = openTabs.find((t) => t.path === relPath);
     if (existing) {
       setActiveTabPath(relPath);
+      if (lineNumber && editorInstance) {
+        editorInstance.revealLineInCenter(lineNumber);
+        editorInstance.setPosition({ lineNumber, column: 1 });
+      }
       return;
     }
 
@@ -154,12 +161,40 @@ export function IdeLayout({ children }: IdeLayoutProps) {
           if (data.warning) {
             addToast('Large File Warning', data.warning, 'warning');
           }
+          if (lineNumber) {
+            setTimeout(() => {
+              const editor = useIdeStore.getState().editorInstance;
+              if (editor) {
+                editor.revealLineInCenter(lineNumber);
+                editor.setPosition({ lineNumber, column: 1 });
+              }
+            }, 100);
+          }
         }
       } catch (err: any) {
         addToast('File Error', err.message, 'error');
       }
     } else {
       openFile(relPath, `// ${relPath}\n// NEXORA AI Source File\n`);
+    }
+  };
+
+  const handleOpenDiff = async (relPath: string, staged = false) => {
+    if (!currentWorkspace) return;
+    try {
+      const res = await fetch(
+        `/api/git/diff?root=${encodeURIComponent(currentWorkspace.rootPath)}&path=${encodeURIComponent(relPath)}&staged=${staged}`,
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      if (res.ok) {
+        const data = await res.json();
+        openDiffTab(relPath, data.original || '', data.modified || '', staged);
+      } else {
+        const err = await res.json();
+        addToast('Diff Failed', err.message || 'Cannot load diff', 'error');
+      }
+    } catch (err: any) {
+      addToast('Diff Error', err.message, 'error');
     }
   };
 
@@ -225,26 +260,14 @@ export function IdeLayout({ children }: IdeLayoutProps) {
             )}
 
             {activeSidebarTab === 'git' && (
-              <SourceControlSidebar onOpenFile={handleOpenFile} />
+              <SourceControlSidebar
+                onOpenFile={handleOpenFile}
+                onOpenDiff={handleOpenDiff}
+              />
             )}
 
             {activeSidebarTab === 'search' && (
-              <div className="flex-1 flex flex-col p-3 text-xs">
-                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
-                  <Search className="w-3.5 h-3.5 text-cyan-400" />
-                  <span>Search in Files</span>
-                </div>
-                <div className="mt-3 space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Search workspace..."
-                    className="w-full bg-[#141414] border border-[#333] rounded px-2.5 py-1.5 text-xs text-neutral-200 focus:outline-none focus:border-cyan-500 font-mono"
-                  />
-                  <div className="text-[10px] text-neutral-500">
-                    Phase 4 will connect real Ripgrep fulltext search.
-                  </div>
-                </div>
-              </div>
+              <SearchSidebar onOpenFile={handleOpenFile} />
             )}
 
             {activeSidebarTab === 'debug' && (
@@ -349,22 +372,39 @@ export function IdeLayout({ children }: IdeLayoutProps) {
               {/* Monaco Editor Container */}
               <div className="flex-1 relative overflow-hidden">
                 {activeTab ? (
-                  <Editor
-                    height="100%"
-                    language={getLanguage(activeTab.path)}
-                    theme="vs-dark"
-                    value={activeTab.content}
-                    onChange={(val) => updateTabContent(activeTab.path, val || '')}
-                    onMount={(editor) => setEditorInstance(editor)}
-                    options={{
-                      fontSize: preferences.fontSize || 13,
-                      tabSize: preferences.tabSize || 2,
-                      minimap: { enabled: preferences.minimap },
-                      wordWrap: preferences.wordWrap ? 'on' : 'off',
-                      scrollBeyondLastLine: false,
-                      automaticLayout: true,
-                    }}
-                  />
+                  activeTab.isDiff && activeTab.diffInfo ? (
+                    <DiffEditor
+                      height="100%"
+                      language={getLanguage(activeTab.path)}
+                      theme="vs-dark"
+                      original={activeTab.diffInfo.original}
+                      modified={activeTab.diffInfo.modified}
+                      options={{
+                        readOnly: true,
+                        fontSize: preferences.fontSize || 13,
+                        minimap: { enabled: preferences.minimap },
+                        automaticLayout: true,
+                        renderSideBySide: true,
+                      }}
+                    />
+                  ) : (
+                    <Editor
+                      height="100%"
+                      language={getLanguage(activeTab.path)}
+                      theme="vs-dark"
+                      value={activeTab.content}
+                      onChange={(val) => updateTabContent(activeTab.path, val || '')}
+                      onMount={(editor) => setEditorInstance(editor)}
+                      options={{
+                        fontSize: preferences.fontSize || 13,
+                        tabSize: preferences.tabSize || 2,
+                        minimap: { enabled: preferences.minimap },
+                        wordWrap: preferences.wordWrap ? 'on' : 'off',
+                        scrollBeyondLastLine: false,
+                        automaticLayout: true,
+                      }}
+                    />
+                  )
                 ) : (
                   <div className="h-full flex flex-col items-center justify-center text-neutral-500 text-xs select-none">
                     <Code2 className="w-10 h-10 mb-2 opacity-30 text-cyan-400" />

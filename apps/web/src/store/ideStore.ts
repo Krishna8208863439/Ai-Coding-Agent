@@ -5,6 +5,12 @@ export interface OpenTab {
   name: string;
   content: string;
   isDirty?: boolean;
+  isDiff?: boolean;
+  diffInfo?: {
+    original: string;
+    modified: string;
+    staged?: boolean;
+  };
 }
 
 export interface WorkspaceDiagnostic {
@@ -26,6 +32,7 @@ interface IdeState {
 
   setCurrentProjectId: (id: string | null) => void;
   openFile: (path: string, content: string) => void;
+  openDiffTab: (path: string, original: string, modified: string, staged?: boolean) => void;
   closeTab: (path: string) => void;
   closeAllTabs: () => void;
   setActiveTabPath: (path: string) => void;
@@ -133,6 +140,36 @@ export const useIdeStore = create<IdeState>((set, get) => ({
       return {
         openTabs: newTabs,
         activeTabPath: path,
+      };
+    }),
+
+  openDiffTab: (path, original, modified, staged = false) =>
+    set((state) => {
+      const diffPath = `[DIFF] ${path}`;
+      const existing = state.openTabs.find((t) => t.path === diffPath);
+      if (existing) {
+        // Update diffInfo
+        const updated = state.openTabs.map((t) =>
+          t.path === diffPath
+            ? { ...t, diffInfo: { original, modified, staged } }
+            : t
+        );
+        return { openTabs: updated, activeTabPath: diffPath };
+      }
+
+      const fileName = path.split('/').pop() || path;
+      const newTab: OpenTab = {
+        path: diffPath,
+        name: `${fileName} (Working Tree)`,
+        content: modified,
+        isDiff: true,
+        diffInfo: { original, modified, staged },
+      };
+
+      const newTabs = [...state.openTabs, newTab];
+      return {
+        openTabs: newTabs,
+        activeTabPath: diffPath,
       };
     }),
 

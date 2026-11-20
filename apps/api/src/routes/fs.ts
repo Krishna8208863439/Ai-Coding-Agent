@@ -387,3 +387,255 @@ fsRouter.post('/rename', requireAuth, async (req: AuthenticatedRequest, res: Res
     });
   }
 });
+
+interface SearchMatch {
+  lineNumber: number;
+  lineText: string;
+  matchIndex: number;
+  matchLength: number;
+}
+
+interface FileSearchResult {
+  file: string;
+  matches: SearchMatch[];
+}
+
+// Helper to escape regex literal strings
+function escapeRegex(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// POST /api/fs/search — Search workspace files by query/regex
+fsRouter.post('/search', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const {
+    root,
+    query,
+    isRegex = false,
+    matchCase = false,
+    matchWholeWord = false,
+    include = '',
+    exclude = '',
+    maxResults = 500,
+  } = req.body;
+
+  if (!root || !query) {
+    res.status(400).json({ error: 'PARAMS_REQUIRED', message: 'root and query are required.' });
+    return;
+  }
+
+  try {
+    const realRoot = assertWithinRoot('', root);
+
+    // Build regex
+    let regex: RegExp;
+    let flags = 'g';
+    if (!matchCase) flags += 'i';
+
+    try {
+      if (isRegex) {
+        regex = new RegExp(query, flags);
+      } else {
+        let pattern = escapeRegex(query);
+        if (matchWholeWord) {
+          pattern = `\\b${pattern}\\b`;
+        }
+        regex = new RegExp(pattern, flags);
+      }
+    } catch (regErr: any) {
+      res.status(400).json({ error: 'INVALID_REGEX', message: regErr.message });
+      return;
+    }
+
+    // Custom includes/excludes
+    const customExcludes = exclude
+      ? exclude.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+      : [];
+    const customIncludes = include
+      ? include.split(',').map((s: string) => s.trim().toLowerCase()).filter(Boolean)
+      : [];
+
+    const results: FileSearchResult[] = [];
+    let totalMatches = 0;
+
+    // Recursive search walk
+    function walk(dir: string, depth = 0) {
+      if (depth > 15 || totalMatches >= maxResults) return;
+
+      let items: fs.Dirent[];
+      try {
+        items = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+
+      for (const item of items) {
+        if (totalMatches >= maxResults) break;
+
+        const fullPath = path.join(dir, item.name);
+        const relPath = path.relative(realRoot, fullPath).replace(/\\/g, '/');
+        const lowerName = item.name.toLowerCase();
+
+        // Check exclusions
+        if (DEFAULT_IGNORED.has(item.name) || customExcludes.some((ex: string) => relPath.toLowerCase().includes(ex) || lowerName === ex)) {
+          continue;
+        }
+
+        if (item.isDirectory()) {
+          walk(fullPath, depth + 1);
+        } else if (item.isFile()) {
+          // Check includes
+          if (customIncludes.length > 0) {
+            const matchesInclude = customIncludes.some((inc: string) => {
+              if (inc.startsWith('*.')) {
+                return lowerName.endsWith(inc.slice(1));
+              }
+              return relPath.toLowerCase().includes(inc);
+            });
+            if (!matchesInclude) continue;
+          }
+
+          try {
+            const stat = fs.statSync(fullPath);
+            // Skip large files > 2MB
+            if (stat.size > 2 * 1024 * 1024) continue;
+
+            // Check binary header
+            const fd = fs.openSync(fullPath, 'r');
+            const header = Buffer.alloc(Math.min(stat.size, 512));
+            fs.readSync(fd, header, 0, header.length, 0);
+            fs.closeSync(fd);
+            if (detectBinary(header)) continue;
+
+            // Read text file line-by-line
+            const content = fs.readFileSync(fullPath, 'utf8');
+            const lines = content.split('\n');
+            const fileMatches: SearchMatch[] = [];
+
+            for (let i = 0; i < lines.length; i++) {
+              if (totalMatches >= maxResults) break;
+              const line = lines[i];
+
+              // Reset regex state
+              regex.lastIndex = 0;
+              let match: RegExpExecArray | null;
+
+              while ((match = regex.exec(line)) !== null) {
+                fileMatches.push({
+                  lineNumber: i + 1,
+                  lineText: line.slice(0, 300),
+                  matchIndex: match.index,
+                  matchLength: match[0].length,
+                });
+                totalMatches++;
+                if (totalMatches >= maxResults || match[0].length === 0) break;
+              }
+            }
+
+            if (fileMatches.length > 0) {
+              results.push({
+                file: relPath,
+                matches: fileMatches,
+              });
+            }
+          } catch {
+            // Ignore unreadable individual files
+          }
+        }
+      }
+    }
+
+    walk(realRoot);
+
+    res.status(200).json({
+      totalMatches,
+      totalFiles: results.length,
+      limitReached: totalMatches >= maxResults,
+      results,
+    });
+  } catch (err: any) {
+    res.status(err.message.includes('Security Exception') ? 403 : 500).json({
+      error: 'SEARCH_FAILED',
+      message: err.message,
+    });
+  }
+});
+
+// POST /api/fs/replace — Replace text in files across workspace
+fsRouter.post('/replace', requireAuth, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+  const {
+    root,
+    query,
+    replacement = '',
+    isRegex = false,
+    matchCase = false,
+    matchWholeWord = false,
+    files = [],
+  } = req.body;
+
+  if (!root || query === undefined) {
+    res.status(400).json({ error: 'PARAMS_REQUIRED', message: 'root and query are required.' });
+    return;
+  }
+
+  try {
+    const realRoot = assertWithinRoot('', root);
+
+    let regex: RegExp;
+    let flags = 'g';
+    if (!matchCase) flags += 'i';
+
+    try {
+      if (isRegex) {
+        regex = new RegExp(query, flags);
+      } else {
+        let pattern = escapeRegex(query);
+        if (matchWholeWord) {
+          pattern = `\\b${pattern}\\b`;
+        }
+        regex = new RegExp(pattern, flags);
+      }
+    } catch (regErr: any) {
+      res.status(400).json({ error: 'INVALID_REGEX', message: regErr.message });
+      return;
+    }
+
+    let filesModified = 0;
+    let totalReplacements = 0;
+
+    for (const relFile of files) {
+      try {
+        const fullPath = assertWithinRoot(relFile, realRoot);
+        if (!fs.existsSync(fullPath)) continue;
+
+        const content = fs.readFileSync(fullPath, 'utf8');
+        let count = 0;
+        const newContent = content.replace(regex, (match) => {
+          count++;
+          return replacement;
+        });
+
+        if (count > 0) {
+          // Atomic write
+          const tmpFile = `${fullPath}.${Date.now()}.nexora_tmp`;
+          fs.writeFileSync(tmpFile, newContent, 'utf8');
+          fs.renameSync(tmpFile, fullPath);
+          filesModified++;
+          totalReplacements += count;
+        }
+      } catch {
+        // Skip individual errors
+      }
+    }
+
+    res.status(200).json({
+      success: true,
+      filesModified,
+      totalReplacements,
+    });
+  } catch (err: any) {
+    res.status(err.message.includes('Security Exception') ? 403 : 500).json({
+      error: 'REPLACE_FAILED',
+      message: err.message,
+    });
+  }
+});
