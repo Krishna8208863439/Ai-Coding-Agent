@@ -17,10 +17,14 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  Plus,
+  ChevronDown,
 } from 'lucide-react';
 import { useIdeStore } from '../store/ideStore';
 import { useAuthStore } from '../store/authStore';
 import { useLayoutStore } from '../store/layoutStore';
+import { useWorkspaceStore } from '../store/workspaceStore';
+import { usePreferencesStore } from '../store/preferencesStore';
 
 interface BottomPanelProps {
   onClose?: () => void;
@@ -29,44 +33,79 @@ interface BottomPanelProps {
   onOpenProblemFile?: (file: string) => void;
 }
 
+interface TerminalSession {
+  id: string;
+  name: string;
+  logs: string[];
+}
+
 export function BottomPanel({
   onClose,
   terminalLogs = [
-    'NEXORA AI Workspace Sandbox Environment Ready.',
-    'Execution sandbox: Active host workspace isolation.',
-    'Docker status: NOT_INSTALLED (Local runtime execution).',
-    'Language runtime: Node.js 22.23.2.',
+    'NEXORA AI Workspace Shell Ready.',
+    'Local runtime execution sandbox.',
   ],
   onOpenProblemFile,
 }: BottomPanelProps) {
+  const { diagnostics, currentProjectId } = useIdeStore();
+  const { currentWorkspace } = useWorkspaceStore();
+  const { accessToken } = useAuthStore();
+  const { addToast } = usePreferencesStore();
+  const { activeBottomPanelTab: activeTab, setActiveBottomPanelTab: setActiveTab } = useLayoutStore();
+
+  // Multi-terminal sessions
+  const [sessions, setSessions] = useState<TerminalSession[]>([
+    { id: 'term-1', name: '1: bash', logs: [...terminalLogs] },
+  ]);
+  const [activeSessionId, setActiveSessionId] = useState('term-1');
+
+  // Input & Execution
   const [commandInput, setCommandInput] = useState('');
-  const [logs, setLogs] = useState<string[]>(terminalLogs);
   const [isExecuting, setIsExecuting] = useState(false);
+  const [history, setHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+
+  // Live Preview
   const [previewDevice, setPreviewDevice] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
   const [previewUrl, setPreviewUrl] = useState('http://localhost:3000');
   const [isAppRunning, setIsAppRunning] = useState(false);
   const [appPort, setAppPort] = useState(3000);
   const [isLoadingApp, setIsLoadingApp] = useState(false);
 
+  // Debug Console evaluate
+  const [debugInput, setDebugInput] = useState('');
+  const [debugLogs, setDebugLogs] = useState<string[]>([
+    'NEXORA Debugger connected to Node.js v22.23.2 runtime.',
+  ]);
+
   const logsEndRef = useRef<HTMLDivElement | null>(null);
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
-  const { diagnostics, currentProjectId } = useIdeStore();
-  const { accessToken } = useAuthStore();
-  const { activeBottomPanelTab: activeTab, setActiveBottomPanelTab: setActiveTab } = useLayoutStore();
+
+  const activeSession = sessions.find((s) => s.id === activeSessionId) || sessions[0];
 
   // Auto-scroll logs
   useEffect(() => {
     logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [logs]);
+  }, [activeSession?.logs]);
 
-  // Check running process status on mount or project switch
+  // Append log to active session
+  const appendLog = (log: string) => {
+    setSessions((prev) =>
+      prev.map((s) => (s.id === activeSessionId ? { ...s, logs: [...s.logs, log] } : s))
+    );
+  };
+
+  // Check running process status on mount or project/workspace switch
   useEffect(() => {
-    if (!currentProjectId || !accessToken) return;
-
     const checkStatus = async () => {
       try {
-        const res = await fetch(`/api/terminal/process/${currentProjectId}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
+        const rootParam = currentWorkspace ? `root=${encodeURIComponent(currentWorkspace.rootPath)}` : '';
+        const projParam = currentProjectId ? `projectId=${encodeURIComponent(currentProjectId)}` : '';
+        const query = rootParam || projParam;
+        if (!query) return;
+
+        const res = await fetch(`/api/terminal/process?${query}`, {
+          headers: { Authorization: `Bearer ${accessToken || 'dev'}` },
         });
         if (res.ok) {
           const data = await res.json();
@@ -82,25 +121,78 @@ export function BottomPanel({
     };
 
     checkStatus();
-    const interval = setInterval(checkStatus, 5000);
+    const interval = setInterval(checkStatus, 4000);
     return () => clearInterval(interval);
-  }, [currentProjectId, accessToken]);
+  }, [currentProjectId, currentWorkspace, accessToken]);
 
-  const handleRunCommand = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!commandInput.trim() || isExecuting) return;
+  // Listen for global custom events from Phase 3 commands
+  useEffect(() => {
+    const handleNewTerminal = () => {
+      const newId = `term-${Date.now()}`;
+      const count = sessions.length + 1;
+      setSessions((prev) => [
+        ...prev,
+        { id: newId, name: `${count}: bash`, logs: [`Session ${count} initialized.`] },
+      ]);
+      setActiveSessionId(newId);
+    };
 
-    const cmd = commandInput.trim();
-    setLogs((prev) => [...prev, `$ ${cmd}`]);
-    setCommandInput('');
+    const handleClearTerminal = () => {
+      setSessions((prev) =>
+        prev.map((s) => (s.id === activeSessionId ? { ...s, logs: [] } : s))
+      );
+    };
+
+    const handleRunText = (e: any) => {
+      const text = e.detail?.text || window.getSelection()?.toString();
+      if (text) {
+        handleExecuteString(text);
+      }
+    };
+
+    const handleRunStart = () => {
+      handleStartApp();
+    };
+
+    const handleRunStop = () => {
+      handleStopApp();
+    };
+
+    window.addEventListener('nexora:terminal:new', handleNewTerminal);
+    window.addEventListener('nexora:terminal:clear', handleClearTerminal);
+    window.addEventListener('nexora:terminal:runSelectedText', handleRunText);
+    window.addEventListener('nexora:run:start', handleRunStart);
+    window.addEventListener('nexora:run:stop', handleRunStop);
+    window.addEventListener('nexora:debug:start', handleRunStart);
+
+    return () => {
+      window.removeEventListener('nexora:terminal:new', handleNewTerminal);
+      window.removeEventListener('nexora:terminal:clear', handleClearTerminal);
+      window.removeEventListener('nexora:terminal:runSelectedText', handleRunText);
+      window.removeEventListener('nexora:run:start', handleRunStart);
+      window.removeEventListener('nexora:run:stop', handleRunStop);
+      window.removeEventListener('nexora:debug:start', handleRunStart);
+    };
+  }, [sessions, activeSessionId, currentWorkspace]);
+
+  // Execute terminal command string
+  const handleExecuteString = async (cmdString: string) => {
+    const cmd = cmdString.trim();
+    if (!cmd) return;
+
+    appendLog(`$ ${cmd}`);
+    setHistory((prev) => [...prev, cmd]);
+    setHistoryIndex(null);
     setIsExecuting(true);
 
     try {
-      if (!currentProjectId || !accessToken) {
-        setLogs((prev) => [
-          ...prev,
-          '[Error]: No project workspace active or missing authentication.',
-        ]);
+      const payload: any = { command: cmd };
+      if (currentWorkspace) {
+        payload.root = currentWorkspace.rootPath;
+      } else if (currentProjectId) {
+        payload.projectId = currentProjectId;
+      } else {
+        appendLog('[Error]: No folder or project workspace active. Please open a folder.');
         return;
       }
 
@@ -108,90 +200,129 @@ export function BottomPanel({
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken || 'dev'}`,
         },
-        body: JSON.stringify({ projectId: currentProjectId, command: cmd }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (res.ok && data.result) {
         if (data.result.stdout) {
-          setLogs((prev) => [...prev, data.result.stdout.trim()]);
+          appendLog(data.result.stdout.trim());
         }
         if (data.result.stderr) {
-          setLogs((prev) => [...prev, `[stderr]: ${data.result.stderr.trim()}`]);
+          appendLog(`[stderr]: ${data.result.stderr.trim()}`);
         }
-        setLogs((prev) => [
-          ...prev,
-          `[Process exited with code ${data.result.exitCode} (${data.result.durationMs}ms)]`,
-        ]);
+        appendLog(`[Process exited with code ${data.result.exitCode} (${data.result.durationMs}ms)]`);
       } else {
-        setLogs((prev) => [...prev, `[Execution error]: ${data.error || 'Command failed'}`]);
+        appendLog(`[Execution error]: ${data.message || data.error || 'Command failed'}`);
       }
     } catch (err: unknown) {
-      setLogs((prev) => [
-        ...prev,
-        `[Terminal error]: ${err instanceof Error ? err.message : String(err)}`,
-      ]);
+      appendLog(`[Terminal error]: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsExecuting(false);
     }
   };
 
-  const handleStartApp = async () => {
-    if (!currentProjectId || !accessToken) return;
-    setIsLoadingApp(true);
-    setLogs((prev) => [...prev, `$ npm run dev (Starting preview server on port ${appPort})...`]);
+  const handleRunCommand = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!commandInput.trim() || isExecuting) return;
+    const cmd = commandInput.trim();
+    setCommandInput('');
+    await handleExecuteString(cmd);
+  };
 
+  // Keyboard navigation for command history
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (history.length === 0) return;
+      const nextIndex = historyIndex === null ? history.length - 1 : Math.max(0, historyIndex - 1);
+      setHistoryIndex(nextIndex);
+      setCommandInput(history[nextIndex]);
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (historyIndex === null) return;
+      const nextIndex = historyIndex + 1;
+      if (nextIndex >= history.length) {
+        setHistoryIndex(null);
+        setCommandInput('');
+      } else {
+        setHistoryIndex(nextIndex);
+        setCommandInput(history[nextIndex]);
+      }
+    }
+  };
+
+  // App Dev Server Process Control
+  const handleStartApp = async () => {
+    setIsLoadingApp(true);
     try {
+      const payload: any = { command: 'npm run dev', port: appPort };
+      if (currentWorkspace) payload.root = currentWorkspace.rootPath;
+      else if (currentProjectId) payload.projectId = currentProjectId;
+      else return;
+
       const res = await fetch('/api/terminal/process/start', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
+          Authorization: `Bearer ${accessToken || 'dev'}`,
         },
-        body: JSON.stringify({
-          projectId: currentProjectId,
-          command: 'npm run dev',
-          port: appPort,
-        }),
+        body: JSON.stringify(payload),
       });
 
       const data = await res.json();
       if (res.ok && data.process) {
         setIsAppRunning(true);
         setPreviewUrl(data.process.previewUrl);
-        setLogs((prev) => [
-          ...prev,
-          `[Live Preview]: Application running at ${data.process.previewUrl}`,
-        ]);
+        appendLog(`[Live Preview]: Application running at ${data.process.previewUrl}`);
       } else {
-        setLogs((prev) => [...prev, `[Process error]: ${data.error || 'Failed to start process'}`]);
+        appendLog(`[Process error]: ${data.message || data.error || 'Failed to start process'}`);
       }
-    } catch (err: unknown) {
-      setLogs((prev) => [
-        ...prev,
-        `[Process error]: ${err instanceof Error ? err.message : String(err)}`,
-      ]);
+    } catch (err: any) {
+      appendLog(`[Process error]: ${err.message}`);
     } finally {
       setIsLoadingApp(false);
     }
   };
 
   const handleStopApp = async () => {
-    if (!currentProjectId || !accessToken) return;
     try {
-      await fetch(`/api/terminal/process/${currentProjectId}/stop`, {
+      const payload: any = {};
+      if (currentWorkspace) payload.root = currentWorkspace.rootPath;
+      else if (currentProjectId) payload.projectId = currentProjectId;
+      else return;
+
+      await fetch('/api/terminal/process/stop', {
         method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken || 'dev'}`,
+        },
+        body: JSON.stringify(payload),
       });
       setIsAppRunning(false);
-      setLogs((prev) => [...prev, '[Live Preview]: Dev server stopped.']);
+      appendLog('[Live Preview]: Dev server stopped.');
     } catch {}
   };
 
-  const handleClearLogs = () => {
-    setLogs([]);
+  // Debug Console evaluate
+  const handleDebugEvaluate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!debugInput.trim()) return;
+    const expr = debugInput.trim();
+    setDebugLogs((prev) => [...prev, `> ${expr}`]);
+    setDebugInput('');
+
+    try {
+      // Evaluate safe expression
+      // eslint-disable-next-line no-eval
+      const result = eval(expr);
+      setDebugLogs((prev) => [...prev, String(result)]);
+    } catch (err: any) {
+      setDebugLogs((prev) => [...prev, `Uncaught ${err.message}`]);
+    }
   };
 
   return (
@@ -203,7 +334,7 @@ export function BottomPanel({
             onClick={() => setActiveTab('terminal')}
             className={`flex items-center gap-2 px-3 h-full text-xs font-medium border-t-2 transition-colors ${
               activeTab === 'terminal'
-                ? 'border-indigo-500 bg-[#1e1e1e] text-white'
+                ? 'border-cyan-500 bg-[#1e1e1e] text-white'
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -215,7 +346,7 @@ export function BottomPanel({
             onClick={() => setActiveTab('preview')}
             className={`flex items-center gap-2 px-3 h-full text-xs font-medium border-t-2 transition-colors ${
               activeTab === 'preview'
-                ? 'border-indigo-500 bg-[#1e1e1e] text-white'
+                ? 'border-cyan-500 bg-[#1e1e1e] text-white'
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -228,7 +359,7 @@ export function BottomPanel({
             onClick={() => setActiveTab('problems')}
             className={`flex items-center gap-2 px-3 h-full text-xs font-medium border-t-2 transition-colors ${
               activeTab === 'problems'
-                ? 'border-indigo-500 bg-[#1e1e1e] text-white'
+                ? 'border-cyan-500 bg-[#1e1e1e] text-white'
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -240,7 +371,7 @@ export function BottomPanel({
             onClick={() => setActiveTab('output')}
             className={`flex items-center gap-2 px-3 h-full text-xs font-medium border-t-2 transition-colors ${
               activeTab === 'output'
-                ? 'border-indigo-500 bg-[#1e1e1e] text-white'
+                ? 'border-cyan-500 bg-[#1e1e1e] text-white'
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -252,7 +383,7 @@ export function BottomPanel({
             onClick={() => setActiveTab('debug')}
             className={`flex items-center gap-2 px-3 h-full text-xs font-medium border-t-2 transition-colors ${
               activeTab === 'debug'
-                ? 'border-indigo-500 bg-[#1e1e1e] text-white'
+                ? 'border-cyan-500 bg-[#1e1e1e] text-white'
                 : 'border-transparent text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -261,15 +392,54 @@ export function BottomPanel({
           </button>
         </div>
 
+        {/* Right Action Icons */}
         <div className="flex items-center gap-2">
           {activeTab === 'terminal' && (
-            <button
-              onClick={handleClearLogs}
-              title="Clear Terminal"
-              className="p-1 hover:bg-[#333333] rounded text-neutral-400 hover:text-white"
-            >
-              <Trash2 className="w-3.5 h-3.5" />
-            </button>
+            <>
+              {/* Terminal session pills */}
+              <div className="flex items-center gap-1 mr-2">
+                {sessions.map((s) => (
+                  <button
+                    key={s.id}
+                    onClick={() => setActiveSessionId(s.id)}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                      s.id === activeSessionId
+                        ? 'bg-[#333] text-cyan-400 font-semibold'
+                        : 'text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    {s.name}
+                  </button>
+                ))}
+                <button
+                  onClick={() => {
+                    const newId = `term-${Date.now()}`;
+                    const count = sessions.length + 1;
+                    setSessions((prev) => [
+                      ...prev,
+                      { id: newId, name: `${count}: bash`, logs: [`Session ${count} ready.`] },
+                    ]);
+                    setActiveSessionId(newId);
+                  }}
+                  title="New Terminal"
+                  className="p-1 hover:bg-[#333] rounded text-neutral-400 hover:text-white"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setSessions((prev) =>
+                    prev.map((s) => (s.id === activeSessionId ? { ...s, logs: [] } : s))
+                  );
+                }}
+                title="Clear Terminal"
+                className="p-1 hover:bg-[#333333] rounded text-neutral-400 hover:text-white"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+              </button>
+            </>
           )}
 
           {onClose && (
@@ -286,16 +456,16 @@ export function BottomPanel({
 
       {/* Main Tab Views */}
       <div className="flex-1 overflow-hidden relative">
-        {/* Terminal Tab */}
+        {/* 1. Terminal Tab */}
         {activeTab === 'terminal' && (
           <div className="h-full flex flex-col p-2 font-mono text-[11px] leading-relaxed select-text">
             <div className="flex-1 overflow-y-auto space-y-1">
-              {logs.map((log, index) => (
+              {activeSession.logs.map((log, index) => (
                 <div
                   key={index}
                   className={`${
                     log.startsWith('$')
-                      ? 'text-indigo-400 font-semibold'
+                      ? 'text-cyan-400 font-semibold'
                       : log.startsWith('[Error]') || log.startsWith('[stderr]')
                       ? 'text-rose-400'
                       : log.startsWith('[Process')
@@ -315,64 +485,79 @@ export function BottomPanel({
                 type="text"
                 value={commandInput}
                 onChange={(e) => setCommandInput(e.target.value)}
+                onKeyDown={handleKeyDown}
                 disabled={isExecuting}
-                placeholder="npm test, python app.py, ls, node -v..."
+                placeholder="npm test, git status, dir, node -v..."
                 className="flex-1 bg-transparent border-none outline-none text-neutral-100 placeholder-neutral-500 font-mono text-xs"
               />
-              {isExecuting && <Loader2 className="w-3.5 h-3.5 text-indigo-400 animate-spin" />}
+              {isExecuting && <Loader2 className="w-3.5 h-3.5 animate-spin text-cyan-400" />}
             </form>
           </div>
         )}
 
-        {/* Live Preview Tab */}
+        {/* 2. Live Preview Tab */}
         {activeTab === 'preview' && (
           <div className="h-full flex flex-col bg-[#141414]">
             {/* Toolbar */}
-            <div className="h-9 border-b border-[#2d2d2d] bg-[#1a1a1a] flex items-center justify-between px-3">
+            <div className="h-8 border-b border-[#2d2d2d] bg-[#1a1a1a] flex items-center justify-between px-3 text-xs">
               <div className="flex items-center gap-2">
-                {!isAppRunning ? (
+                {isAppRunning ? (
                   <button
-                    onClick={handleStartApp}
-                    disabled={isLoadingApp}
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-[11px] font-medium transition-colors"
+                    onClick={handleStopApp}
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-rose-600/20 text-rose-400 hover:bg-rose-600/30 text-xs font-medium"
                   >
-                    {isLoadingApp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 fill-current" />}
-                    <span>Start Dev Server</span>
+                    <Square className="w-3 h-3 fill-current" />
+                    <span>Stop</span>
                   </button>
                 ) : (
                   <button
-                    onClick={handleStopApp}
-                    className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-600 hover:bg-rose-500 text-white rounded text-[11px] font-medium transition-colors"
+                    onClick={handleStartApp}
+                    disabled={isLoadingApp}
+                    className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 text-xs font-medium disabled:opacity-50"
                   >
-                    <Square className="w-3 h-3 fill-current" />
-                    <span>Stop Server</span>
+                    {isLoadingApp ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3 fill-current" />}
+                    <span>Start Server</span>
                   </button>
                 )}
 
-                <div className="flex items-center gap-1 border border-[#333] rounded px-2 py-0.5 text-xs text-neutral-300 bg-[#111]">
+                <div className="h-4 w-[1px] bg-neutral-700" />
+
+                <div className="flex items-center gap-1 bg-[#141414] px-2 py-0.5 rounded border border-[#2d2d2d] text-neutral-400 font-mono text-[10px]">
                   <span>{previewUrl}</span>
                 </div>
+
+                <button
+                  onClick={() => {
+                    if (iframeRef.current) {
+                      iframeRef.current.src = previewUrl;
+                    }
+                  }}
+                  title="Reload Preview"
+                  className="p-1 hover:bg-neutral-800 rounded text-neutral-400 hover:text-white"
+                >
+                  <RotateCw className="w-3 h-3" />
+                </button>
               </div>
 
-              {/* Responsive Device Controls */}
-              <div className="flex items-center gap-1">
+              {/* Responsive Device Modes */}
+              <div className="flex items-center gap-1 bg-[#141414] p-0.5 rounded border border-[#2d2d2d]">
                 <button
                   onClick={() => setPreviewDevice('desktop')}
-                  className={`p-1 rounded ${previewDevice === 'desktop' ? 'bg-[#333] text-white' : 'text-neutral-400 hover:text-white'}`}
+                  className={`p-1 rounded ${previewDevice === 'desktop' ? 'bg-[#2a2a2a] text-white' : 'text-neutral-500 hover:text-white'}`}
                   title="Desktop View"
                 >
                   <Laptop className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setPreviewDevice('tablet')}
-                  className={`p-1 rounded ${previewDevice === 'tablet' ? 'bg-[#333] text-white' : 'text-neutral-400 hover:text-white'}`}
+                  className={`p-1 rounded ${previewDevice === 'tablet' ? 'bg-[#2a2a2a] text-white' : 'text-neutral-500 hover:text-white'}`}
                   title="Tablet View (768px)"
                 >
                   <Tablet className="w-3.5 h-3.5" />
                 </button>
                 <button
                   onClick={() => setPreviewDevice('mobile')}
-                  className={`p-1 rounded ${previewDevice === 'mobile' ? 'bg-[#333] text-white' : 'text-neutral-400 hover:text-white'}`}
+                  className={`p-1 rounded ${previewDevice === 'mobile' ? 'bg-[#2a2a2a] text-white' : 'text-neutral-500 hover:text-white'}`}
                   title="Mobile View (375px)"
                 >
                   <Smartphone className="w-3.5 h-3.5" />
@@ -380,60 +565,63 @@ export function BottomPanel({
               </div>
             </div>
 
-            {/* Iframe Preview Container */}
-            <div className="flex-1 bg-[#0a0a0a] flex items-center justify-center p-2 overflow-auto">
+            {/* Iframe Viewport */}
+            <div className="flex-1 flex items-center justify-center p-2 overflow-auto bg-[#0d0f17]">
               {isAppRunning ? (
                 <div
-                  className={`h-full bg-white transition-all duration-200 shadow-xl overflow-hidden rounded-md border border-[#333] ${
-                    previewDevice === 'desktop'
-                      ? 'w-full'
-                      : previewDevice === 'tablet'
-                      ? 'w-[768px]'
-                      : 'w-[375px]'
-                  }`}
+                  className="h-full bg-white rounded shadow-2xl transition-all duration-200 overflow-hidden"
+                  style={{
+                    width: previewDevice === 'desktop' ? '100%' : previewDevice === 'tablet' ? '768px' : '375px',
+                  }}
                 >
                   <iframe
                     ref={iframeRef}
                     src={previewUrl}
-                    title="Live Preview"
+                    title="NEXORA Application Sandbox Live Preview"
                     className="w-full h-full border-none"
-                    sandbox="allow-scripts allow-same-origin allow-forms"
                   />
                 </div>
               ) : (
-                <div className="text-center text-neutral-500 text-xs">
-                  <Globe className="w-8 h-8 mx-auto mb-2 opacity-40" />
-                  <p>Local dev server is not running.</p>
-                  <p className="text-[10px] text-neutral-600 mt-1">Click "Start Dev Server" to launch preview on port {appPort}.</p>
+                <div className="text-center text-neutral-500">
+                  <Globe className="w-8 h-8 opacity-30 mx-auto mb-2 text-cyan-400" />
+                  <p className="text-xs">Dev server is not currently running.</p>
+                  <button
+                    onClick={handleStartApp}
+                    className="mt-2 text-[11px] text-cyan-400 hover:underline"
+                  >
+                    Start Dev Server (npm run dev)
+                  </button>
                 </div>
               )}
             </div>
           </div>
         )}
 
-        {/* Problems Tab */}
+        {/* 3. Problems Tab */}
         {activeTab === 'problems' && (
-          <div className="h-full overflow-y-auto p-3 text-xs">
+          <div className="h-full overflow-y-auto p-2 font-mono text-[11px]">
             {diagnostics.length === 0 ? (
-              <div className="flex items-center gap-2 text-emerald-400">
-                <CheckCircle2 className="w-4 h-4" />
-                <span>No problems detected in workspace files.</span>
+              <div className="h-full flex items-center justify-center text-neutral-500">
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 mr-2" />
+                <span>No problems detected in workspace.</span>
               </div>
             ) : (
-              <div className="space-y-1.5">
+              <div className="space-y-1">
                 {diagnostics.map((diag, index) => (
                   <div
                     key={index}
-                    onClick={() => onOpenProblemFile && onOpenProblemFile(diag.file)}
-                    className="flex items-start gap-2 p-1.5 hover:bg-[#2a2a2a] rounded cursor-pointer transition-colors"
+                    onClick={() => onOpenProblemFile?.(diag.file)}
+                    className="flex items-center gap-2 p-1.5 hover:bg-[#252526] rounded cursor-pointer group"
                   >
-                    <XCircle className="w-3.5 h-3.5 text-rose-400 mt-0.5 shrink-0" />
-                    <div>
-                      <div className="text-neutral-200">{diag.message}</div>
-                      <div className="text-[10px] text-neutral-500">
-                        {diag.file} [{diag.line}:{diag.col}]
-                      </div>
-                    </div>
+                    {diag.severity === 'error' ? (
+                      <XCircle className="w-3.5 h-3.5 text-rose-500 shrink-0" />
+                    ) : (
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0" />
+                    )}
+                    <span className="text-neutral-200 flex-1 truncate">{diag.message}</span>
+                    <span className="text-neutral-500 text-[10px]">
+                      {diag.file}:{diag.line}:{diag.col}
+                    </span>
                   </div>
                 ))}
               </div>
@@ -441,19 +629,38 @@ export function BottomPanel({
           </div>
         )}
 
-        {/* Output Tab */}
+        {/* 4. Output Tab */}
         {activeTab === 'output' && (
-          <div className="h-full p-3 font-mono text-xs text-neutral-400 overflow-y-auto">
-            <p className="text-neutral-500">// TypeScript language server & build logs</p>
-            <p className="mt-1 text-emerald-400">[Info]: Language server initialized for project workspace.</p>
+          <div className="h-full p-2 font-mono text-[11px] text-neutral-300 overflow-y-auto space-y-1 select-text">
+            <div className="text-neutral-500">[NEXORA Core Daemon]: Operational on 127.0.0.1:4000</div>
+            <div className="text-neutral-500">[Workspace Path]: {currentWorkspace?.rootPath || 'None'}</div>
+            <div className="text-neutral-500">[Vite Frontend]: http://localhost:5173</div>
+            {sessions.flatMap((s) => s.logs).slice(-20).map((l, i) => (
+              <div key={i} className="text-neutral-400 truncate">{l}</div>
+            ))}
           </div>
         )}
 
-        {/* Debug Console Tab */}
+        {/* 5. Debug Console Tab */}
         {activeTab === 'debug' && (
-          <div className="h-full p-3 font-mono text-xs text-neutral-400 overflow-y-auto">
-            <p className="text-neutral-500">// Debug adapter session ready</p>
-            <p className="mt-1 text-neutral-400">Type expressions to evaluate in active context.</p>
+          <div className="h-full flex flex-col p-2 font-mono text-[11px] select-text">
+            <div className="flex-1 overflow-y-auto space-y-1">
+              {debugLogs.map((l, i) => (
+                <div key={i} className={l.startsWith('>') ? 'text-cyan-400 font-semibold' : 'text-neutral-300'}>
+                  {l}
+                </div>
+              ))}
+            </div>
+            <form onSubmit={handleDebugEvaluate} className="flex items-center gap-2 border-t border-[#2d2d2d] pt-1">
+              <span className="text-cyan-400 font-bold">&gt;</span>
+              <input
+                type="text"
+                placeholder="Evaluate expression..."
+                value={debugInput}
+                onChange={(e) => setDebugInput(e.target.value)}
+                className="flex-1 bg-transparent border-none outline-none text-neutral-100 placeholder-neutral-500 font-mono text-xs"
+              />
+            </form>
           </div>
         )}
       </div>

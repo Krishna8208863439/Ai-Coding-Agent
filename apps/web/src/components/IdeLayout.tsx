@@ -5,6 +5,7 @@ import { ActivityBar, ActivityTab } from './ActivityBar';
 import { ExplorerSidebar } from './ExplorerSidebar';
 import { SourceControlSidebar } from './SourceControlSidebar';
 import { SearchSidebar } from './SearchSidebar';
+import { RunAndDebugSidebar } from './RunAndDebugSidebar';
 import { AiAgentPanel } from './AiAgentPanel';
 import { BottomPanel } from './BottomPanel';
 import { StatusBar } from './StatusBar';
@@ -44,6 +45,7 @@ import {
   ShieldAlert,
   AlertTriangle,
   FolderOpen,
+  Plus,
 } from 'lucide-react';
 
 interface IdeLayoutProps {
@@ -245,6 +247,18 @@ export function IdeLayout({ children }: IdeLayoutProps) {
               navigate('/new-project');
               return;
             }
+            if (tab === 'settings') {
+              openSettings();
+              return;
+            }
+            if (tab === 'terminal') {
+              useLayoutStore.getState().setActiveBottomPanelTab('terminal');
+              if (!isBottomPanelOpen) toggleBottomPanel();
+              return;
+            }
+            if (tab === 'agents') {
+              if (!isAiPanelOpen) toggleAiPanel();
+            }
             setActiveSidebarTab(tab);
           }}
         />
@@ -271,21 +285,7 @@ export function IdeLayout({ children }: IdeLayoutProps) {
             )}
 
             {activeSidebarTab === 'debug' && (
-              <div className="flex-1 flex flex-col p-3 text-xs">
-                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
-                  <Bug className="w-3.5 h-3.5 text-amber-400" />
-                  <span>Run & Debug Configurations</span>
-                </div>
-                <div className="mt-3 text-neutral-400">
-                  <p>Run configurations active in Bottom Panel.</p>
-                  <button
-                    onClick={toggleBottomPanel}
-                    className="mt-2 px-3 py-1 bg-[#252526] hover:bg-[#2d2d2d] border border-[#333] rounded text-neutral-200 text-xs"
-                  >
-                    Open Terminal / Debug
-                  </button>
-                </div>
-              </div>
+              <RunAndDebugSidebar />
             )}
 
             {activeSidebarTab === 'agents' && (
@@ -307,11 +307,48 @@ export function IdeLayout({ children }: IdeLayoutProps) {
 
             {activeSidebarTab === 'terminal' && (
               <div className="flex-1 flex flex-col p-3 text-xs">
-                <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px] pb-2 border-b border-[#2d2d2d]">
-                  <Terminal className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>Integrated Terminal</span>
+                <div className="flex items-center justify-between pb-2 border-b border-[#2d2d2d]">
+                  <div className="flex items-center gap-1.5 font-semibold text-neutral-200 uppercase text-[11px]">
+                    <Terminal className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Terminal Sessions</span>
+                  </div>
+                  <button
+                    onClick={() => window.dispatchEvent(new CustomEvent('nexora:terminal:new'))}
+                    title="New Terminal"
+                    className="p-1 hover:text-white text-neutral-400 hover:bg-[#2b2b2b] rounded transition-colors"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <p className="mt-3 text-neutral-400">Focusing terminal in bottom workspace panel...</p>
+                <div className="mt-3 space-y-2">
+                  <div className="p-2.5 bg-[#202020] rounded border border-[#2e2e2e] space-y-1 text-[11px] font-mono">
+                    <div className="text-neutral-400 flex justify-between">
+                      <span>CWD:</span>
+                      <span className="text-neutral-200 truncate max-w-[140px]" title={currentWorkspace?.rootPath}>
+                        {currentWorkspace ? currentWorkspace.name : 'sandbox'}
+                      </span>
+                    </div>
+                    <div className="text-neutral-400 flex justify-between">
+                      <span>Shell:</span>
+                      <span className="text-neutral-200">bash / pwsh</span>
+                    </div>
+                    <div className="text-neutral-400 flex justify-between">
+                      <span>Platform:</span>
+                      <span className="text-neutral-200">win32</span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      useLayoutStore.getState().setActiveBottomPanelTab('terminal');
+                      if (!isBottomPanelOpen) toggleBottomPanel();
+                    }}
+                    className="w-full py-1.5 px-3 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-medium transition-colors flex items-center justify-center gap-1.5"
+                  >
+                    <Terminal className="w-3.5 h-3.5" />
+                    <span>Open Terminal Panel (Ctrl+`)</span>
+                  </button>
+                </div>
               </div>
             )}
           </aside>
